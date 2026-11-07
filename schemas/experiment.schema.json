@@ -1,0 +1,217 @@
+{
+  "$defs": {
+    "ExperimentOutcome": {
+      "enum": [
+        "pending",
+        "positive",
+        "negative",
+        "inconclusive",
+        "failed",
+        "invalid"
+      ],
+      "title": "ExperimentOutcome",
+      "type": "string"
+    },
+    "ExperimentStatus": {
+      "enum": [
+        "planned",
+        "ready",
+        "running",
+        "blocked",
+        "needs_review",
+        "completed",
+        "abandoned"
+      ],
+      "title": "ExperimentStatus",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "default": 1,
+      "description": "Schema version",
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "id": {
+      "description": "Unique entity identifier",
+      "title": "Id",
+      "type": "string"
+    },
+    "kind": {
+      "const": "experiment",
+      "default": "experiment",
+      "title": "Kind",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    },
+    "project_id": {
+      "description": "Parent Project ID",
+      "title": "Project Id",
+      "type": "string"
+    },
+    "title": {
+      "description": "Experiment title",
+      "title": "Title",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/ExperimentStatus",
+      "default": "planned"
+    },
+    "outcome": {
+      "$ref": "#/$defs/ExperimentOutcome",
+      "default": "pending"
+    },
+    "is_exploratory": {
+      "default": false,
+      "description": "Flag for exploratory experiments with partial specs",
+      "title": "Is Exploratory",
+      "type": "boolean"
+    },
+    "objective": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Objective"
+    },
+    "research_question": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Research Question"
+    },
+    "hypothesis": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Hypothesis"
+    },
+    "rationale": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rationale"
+    },
+    "literature": {
+      "description": "Referenced Paper IDs",
+      "items": {
+        "type": "string"
+      },
+      "title": "Literature",
+      "type": "array"
+    },
+    "execution": {
+      "additionalProperties": true,
+      "description": "Execution environment/scripts",
+      "title": "Execution",
+      "type": "object"
+    },
+    "method": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Method"
+    },
+    "planned_parameters": {
+      "additionalProperties": true,
+      "title": "Planned Parameters",
+      "type": "object"
+    },
+    "expected_result": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expected Result"
+    },
+    "success_criteria": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Success Criteria",
+      "type": "array"
+    },
+    "inputs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Inputs",
+      "type": "array"
+    },
+    "planned_outputs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Planned Outputs",
+      "type": "array"
+    },
+    "runs": {
+      "description": "Run IDs",
+      "items": {
+        "type": "string"
+      },
+      "title": "Runs",
+      "type": "array"
+    },
+    "findings": {
+      "description": "Finding IDs",
+      "items": {
+        "type": "string"
+      },
+      "title": "Findings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "project_id",
+    "title"
+  ],
+  "title": "Experiment",
+  "type": "object"
+}

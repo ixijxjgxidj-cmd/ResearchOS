@@ -1,0 +1,122 @@
+{
+  "$defs": {
+    "ArtifactRole": {
+      "enum": [
+        "raw_data",
+        "dataset",
+        "config",
+        "source_code",
+        "log",
+        "metrics",
+        "figure",
+        "checkpoint",
+        "report"
+      ],
+      "title": "ArtifactRole",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "default": 1,
+      "description": "Schema version",
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "id": {
+      "description": "Unique entity identifier",
+      "title": "Id",
+      "type": "string"
+    },
+    "kind": {
+      "const": "artifact",
+      "default": "artifact",
+      "title": "Kind",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    },
+    "run_id": {
+      "description": "Originating Run ID",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "name": {
+      "description": "Artifact name or filename",
+      "title": "Name",
+      "type": "string"
+    },
+    "role": {
+      "$ref": "#/$defs/ArtifactRole",
+      "description": "Role classification"
+    },
+    "storage_backend": {
+      "default": "local",
+      "description": "Storage backend: local, dsh, gdrive, etc.",
+      "title": "Storage Backend",
+      "type": "string"
+    },
+    "path": {
+      "description": "Relative or external path",
+      "title": "Path",
+      "type": "string"
+    },
+    "server_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Server Id"
+    },
+    "media_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Media Type"
+    },
+    "size_bytes": {
+      "default": 0,
+      "title": "Size Bytes",
+      "type": "integer"
+    },
+    "sha256": {
+      "description": "SHA-256 cryptographic hash",
+      "title": "Sha256",
+      "type": "string"
+    },
+    "immutable": {
+      "default": true,
+      "title": "Immutable",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "id",
+    "run_id",
+    "name",
+    "role",
+    "path",
+    "sha256"
+  ],
+  "title": "Artifact",
+  "type": "object"
+}
