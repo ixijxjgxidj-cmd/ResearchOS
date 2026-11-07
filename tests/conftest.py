@@ -1,27 +1,21 @@
-"""Pytest configuration and shared fixtures for ResearchOS test suite."""
+"""Pytest configuration and shared fixtures for ResearchOS Universal Memory test suite."""
 
 from pathlib import Path
+
 import pytest
 
-from researchos.services.artifact_service import ArtifactService
-from researchos.services.audit_service import AuditService
-from researchos.services.claim_service import ClaimService
-from researchos.services.context_service import ContextService
-from researchos.services.experiment_service import ExperimentService
-from researchos.services.finding_service import FindingService
-from researchos.services.handoff_service import HandoffService
-from researchos.services.paper_service import PaperService
-from researchos.services.project_service import ProjectService
-from researchos.services.run_service import RunService
+from researchos.core.context_builder import ContextBuilder
+from researchos.core.handoff_service import HandoffService
+from researchos.core.memory_service import MemoryService
+from researchos.core.project_service import ProjectService
+from researchos.core.retrieval_service import RetrievalService
 
 
 @pytest.fixture
 def vault_dir(tmp_path: Path) -> Path:
-    """Provides an initialized clean temporary ResearchVault."""
+    """Provides a clean temporary ResearchVault directory."""
     v_dir = tmp_path / "test_vault"
     v_dir.mkdir(parents=True, exist_ok=True)
-    p_svc = ProjectService(v_dir)
-    p_svc.init_vault()
     return v_dir
 
 
@@ -31,45 +25,20 @@ def project_service(vault_dir: Path) -> ProjectService:
 
 
 @pytest.fixture
-def experiment_service(vault_dir: Path) -> ExperimentService:
-    return ExperimentService(vault_dir)
+def memory_service(vault_dir: Path) -> MemoryService:
+    return MemoryService(vault_dir)
 
 
 @pytest.fixture
-def run_service(vault_dir: Path) -> RunService:
-    return RunService(vault_dir)
+def retrieval_service(vault_dir: Path) -> RetrievalService:
+    return RetrievalService(vault_dir)
 
 
 @pytest.fixture
-def paper_service(vault_dir: Path) -> PaperService:
-    return PaperService(vault_dir)
-
-
-@pytest.fixture
-def artifact_service(vault_dir: Path) -> ArtifactService:
-    return ArtifactService(vault_dir)
-
-
-@pytest.fixture
-def finding_service(vault_dir: Path) -> FindingService:
-    return FindingService(vault_dir)
-
-
-@pytest.fixture
-def claim_service(vault_dir: Path) -> ClaimService:
-    return ClaimService(vault_dir)
-
-
-@pytest.fixture
-def context_service(vault_dir: Path) -> ContextService:
-    return ContextService(vault_dir)
+def context_builder(vault_dir: Path) -> ContextBuilder:
+    return ContextBuilder(vault_dir)
 
 
 @pytest.fixture
 def handoff_service(vault_dir: Path) -> HandoffService:
     return HandoffService(vault_dir)
-
-
-@pytest.fixture
-def audit_service(vault_dir: Path) -> AuditService:
-    return AuditService(vault_dir)

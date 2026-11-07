@@ -1,80 +1,121 @@
-"""Test H: MCP server tools invocation and validation."""
+"""Test: MCP Server tool execution and responses for v2 Universal Memory."""
 
 from pathlib import Path
-from researchos.adapters.mcp_server import (
-    research_audit,
-    research_context_build,
-    research_experiment_create,
-    research_experiment_validate,
-    research_project_create,
-    research_project_list,
-    research_run_complete,
-    research_run_create,
+
+from researchos.interfaces.mcp.server import (
+    context_build,
+    handoff_create,
+    handoff_get,
+    index_rebuild,
+    memory_add,
+    memory_archive,
+    memory_get,
+    memory_search,
+    memory_supersede,
+    memory_update,
+    project_create,
+    project_get,
+    project_list,
+    project_validate,
 )
 
 
-def test_mcp_tools(vault_dir: Path):
-    v_str = str(vault_dir)
+def test_mcp_tools_lifecycle(tmp_path: Path):
+    v_str = str(tmp_path / "vault")
 
-    # 1. Project create
-    p_res = research_project_create(
-        name="MCP Verification Project",
-        research_question="Can MCP tools coordinate research workflows?",
+    # 1. project_create
+    p_res = project_create(
+        name="MCP Protocol Project",
+        project_id="mcp-proj",
+        description="Testing MCP server tools",
+        research_goal="Verify MCP compatibility",
         vault_root=v_str,
     )
     assert p_res["status"] == "success"
-    proj_id = p_res["id"]
-    assert proj_id.startswith("PRJ-")
+    assert p_res["project_id"] == "mcp-proj"
 
-    # 2. Project list
-    p_list = research_project_list(vault_root=v_str)
-    assert p_list["status"] == "success"
-    assert any(p["id"] == proj_id for p in p_list["projects"])
+    # 2. project_list
+    l_res = project_list(vault_root=v_str)
+    assert l_res["status"] == "success"
+    assert l_res["total"] == 1
 
-    # 3. Experiment create
-    e_res = research_experiment_create(
-        project_id=proj_id,
-        title="MCP Tooling Experiment",
-        hypothesis="All MCP endpoints conform to schema contracts.",
-        method="Call tool handlers in sequence.",
-        planned_parameters={"batch": 16},
-        success_criteria=["status == success"],
+    # 3. project_get
+    g_res = project_get(project_id="mcp-proj", vault_root=v_str)
+    assert g_res["status"] == "success"
+    assert g_res["project_name"] == "MCP Protocol Project"
+
+    # 4. memory_add
+    m_res = memory_add(
+        project_id="mcp-proj",
+        type="observation",
+        title="Inference Speedup with vLLM PagedAttention",
+        content="PagedAttention delivers 3.5x higher serving throughput.",
+        tags=["inference", "vllm"],
+        source_agent="agent-mcp",
+        source_skill="serving-skill",
+        confidence=0.96,
         vault_root=v_str,
     )
-    assert e_res["status"] == "success"
-    exp_id = e_res["id"]
+    assert m_res["status"] == "success"
+    mem_id = m_res["memory_id"]
+    assert mem_id.startswith("MEM-")
 
-    # 4. Experiment validate (preflight)
-    val_res = research_experiment_validate(experiment_id=exp_id, vault_root=v_str)
-    assert val_res["status"] == "success"
-    assert val_res["preflight"] == "passed"
+    # 5. memory_get
+    mg_res = memory_get(project_id="mcp-proj", memory_id=mem_id, vault_root=v_str)
+    assert mg_res["status"] == "success"
+    assert mg_res["title"] == "Inference Speedup with vLLM PagedAttention"
+    assert mg_res["confidence"] == 0.96
 
-    # 5. Run create
-    r_res = research_run_create(
-        experiment_id=exp_id,
-        agent_name="mcp_test_agent",
+    # 6. memory_search
+    s_res = memory_search(project_id="mcp-proj", query="PagedAttention", vault_root=v_str)
+    assert s_res["status"] == "success"
+    assert s_res["total_hits"] >= 1
+    assert s_res["hits"][0]["memory_id"] == mem_id
+
+    # 7. memory_update
+    u_res = memory_update(project_id="mcp-proj", memory_id=mem_id, confidence=0.99, vault_root=v_str)
+    assert u_res["status"] == "success"
+
+    # 8. memory_supersede
+    sup_res = memory_supersede(
+        project_id="mcp-proj",
+        old_memory_id=mem_id,
+        title="PagedAttention v2 Further Reduces KV Cache Fragmentation",
+        content="PagedAttention v2 adds continuous batching and reduces waste by 12%.",
+        reason="Upgraded vLLM backend to release 0.6.",
         vault_root=v_str,
     )
-    assert r_res["status"] == "success"
-    run_id = r_res["id"]
+    assert sup_res["status"] == "success"
+    new_mem_id = sup_res["new_memory_id"]
 
-    # 6. Run complete
-    comp_res = research_run_complete(
-        run_id=run_id,
-        actual_parameters={"batch": 16, "lr": 0.001},
-        status="succeeded",
-        experiment_outcome="positive",
-        metrics={"accuracy": 0.99},
-        result_summary="MCP test run verified.",
-        vault_root=v_str,
-    )
-    assert comp_res["status"] == "success"
+    # 9. memory_archive
+    arc_res = memory_archive(project_id="mcp-proj", memory_id=new_mem_id, reason="Completed milestone", vault_root=v_str)
+    assert arc_res["status"] == "success"
+    assert arc_res["status_field"] == "archived"
 
-    # 7. Context build
-    ctx_res = research_context_build(target_id=exp_id, vault_root=v_str)
+    # 10. context_build
+    ctx_res = context_build(project_id="mcp-proj", context_mode="quick", max_tokens=3000, vault_root=v_str)
     assert ctx_res["status"] == "success"
-    assert "MCP Verification Project" in ctx_res["context_pack"]
+    assert "MCP Protocol Project" in ctx_res["context_pack"]
 
-    # 8. Audit
-    aud_res = research_audit(project_id=proj_id, vault_root=v_str)
-    assert "errors" in aud_res
+    # 11. handoff_create & handoff_get
+    h_res = handoff_create(
+        project_id="mcp-proj",
+        task="MCP verification suite",
+        completed_work=["Validated all tools"],
+        current_progress="Ready for deployment",
+        agent_id="test-runner",
+        vault_root=v_str,
+    )
+    assert h_res["status"] == "success"
+
+    hg_res = handoff_get(project_id="mcp-proj", vault_root=v_str)
+    assert hg_res["status"] == "success"
+    assert "MCP verification suite" in hg_res["handoff_content"]
+
+    # 12. index_rebuild & project_validate
+    idx_res = index_rebuild(project_id="mcp-proj", vault_root=v_str)
+    assert idx_res["status"] == "success"
+
+    val_res = project_validate(project_id="mcp-proj", vault_root=v_str)
+    assert val_res["valid"] is True

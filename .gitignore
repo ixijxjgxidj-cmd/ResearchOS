@@ -42,4 +42,5 @@ Thumbs.db
 .idea/
 
 # Local ResearchOS artifacts during dev/test
-.researchos/locks/*.lock
+*.lock
+.backup_*

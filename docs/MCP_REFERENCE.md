@@ -1,64 +1,169 @@
 # ResearchOS Model Context Protocol (MCP) Reference
 
-The ResearchOS MCP server operates over standard STDIO transport. All tools invoke the unified Service Layer and guarantee input validation, path security, and credential redaction.
+ResearchOS exposes a standardized MCP server interface enabling LLM Agents to manage and query persistent long-term research memory.
 
-## Tool Catalog
+Server transport supports both `stdio` and `sse`.
 
-### 1. Project Management
-- `research_project_create`: Creates a new research project.
-  - Parameters: `name` (str, req), `research_question` (str), `objectives` (list[str]), `scope` (str), `members` (list[str]), `repositories` (list[str]), `vault_root` (str).
-- `research_project_list`: Lists all projects.
-- `research_project_get`: Retrieves full project metadata and body.
-  - Parameters: `project_id` (str, req).
-- `research_project_status`: Summarizes run velocity and handoff pointers.
-  - Parameters: `project_id` (str, req).
+---
 
-### 2. Experiment Management
-- `research_experiment_create`: Creates an experiment design.
-  - Parameters: `project_id` (str, req), `title` (str, req), `objective` (str), `hypothesis` (str), `method` (str), `planned_parameters` (dict), `expected_result` (str), `success_criteria` (list[str]), `is_exploratory` (bool).
-- `research_experiment_get`: Retrieves experiment specification.
-  - Parameters: `experiment_id` (str, req).
-- `research_experiment_list`: Lists experiments optionally filtered by project and status.
-  - Parameters: `project_id` (str), `status` (str).
-- `research_experiment_update`: Updates experiment state and records parameter change warnings.
-  - Parameters: `experiment_id` (str, req), `updates` (dict, req), `reason` (str).
-- `research_experiment_validate`: Runs preflight check before moving to ready.
-  - Parameters: `experiment_id` (str, req).
+## 1. Project Management Tools
 
-### 3. Run Execution & Telemetry
-- `research_run_create`: Initializes an execution run.
-  - Parameters: `experiment_id` (str, req), `agent_name` (str, req), `executor_type` (str), `server_id` (str), `working_directory` (str), `code_repository` (str), `code_commit` (str).
-- `research_run_get`: Retrieves run details and execution telemetry.
-  - Parameters: `run_id` (str, req).
-- `research_run_update`: Updates intermediate progress.
-  - Parameters: `run_id` (str, req), `updates` (dict, req).
-- `research_run_complete`: Completes a run, records actual parameters, metrics, deviations, and outcome.
-  - Parameters: `run_id` (str, req), `actual_parameters` (dict, req), `status` (str), `experiment_outcome` (str), `metrics` (dict), `errors` (list[str]), `deviations` (list[str]), `result_summary` (str).
+### `project_create`
+Idempotently creates a new independent project folder with standard subdirectories and documents.
+- **Parameters**:
+  - `name` (string, required): Human-readable project title.
+  - `project_id` (string, optional): Explicit directory ID/slug (auto-generated if omitted).
+  - `description` (string, optional): Short project summary.
+  - `research_goal` (string, optional): Core scientific objective.
+  - `tags` (list[string], optional): Classification tags.
+  - `vault_root` (string, optional): Path to vault root.
+- **Returns**: `{"status": "success", "project_id": "...", "project_dir": "...", ...}`
 
-### 4. Literature (No Zotero)
-- `research_paper_create`: Registers a paper note.
-  - Parameters: `title` (str, req), `citekey` (str, req), `authors` (list[str]), `year` (int), `doi` (str), `abstract` (str), `reading_status` (str), `projects` (list[str]).
-- `research_paper_get`: Retrieves paper by ID or citekey.
-  - Parameters: `identifier` (str, req).
-- `research_paper_search`: Searches papers across titles, citekeys, and abstracts.
-  - Parameters: `query` (str, req), `tags` (list[str]), `reading_status` (str).
+### `project_list`
+Lists all independent research projects in the vault.
+- **Parameters**:
+  - `vault_root` (string, optional)
+- **Returns**: `{"status": "success", "total": 2, "projects": [...]}`
 
-### 5. Artifacts
-- `research_artifact_register`: Computes SHA-256 and registers an artifact.
-  - Parameters: `run_id` (str, req), `path` (str, req), `role` (str, req), `name` (str), `storage_backend` (str).
+### `project_get`
+Retrieves project metadata, current state summary, and latest handoff.
+- **Parameters**:
+  - `project_id` (string, required)
+  - `vault_root` (string, optional)
+- **Returns**: `{"status": "success", "project_id": "...", "state_summary": "...", "handoff_summary": "..."}`
 
-### 6. Findings & Claims
-- `research_finding_create`: Registers empirical findings.
-  - Parameters: `project_id` (str, req), `experiment_id` (str, req), `title` (str, req), `summary` (str), `evidence_artifacts` (list[str]).
-- `research_claim_create`: Registers publication-ready claims.
-  - Parameters: `project_id` (str, req), `text` (str, req), `status` (str), `supporting_experiments` (list[str]), `contradicting_experiments` (list[str]), `limitations` (list[str]).
+---
 
-### 7. Context Builder & Handoff
-- `research_context_build`: Generates deterministic Markdown Context Pack for an experiment or project.
-  - Parameters: `target_id` (str, req).
-- `research_handoff_update`: Updates `HANDOFF.md` and `STATUS.md`.
-  - Parameters: `project_id` (str, req), `current_focus` (str, req), `completed_since_last` (list[str]), `modified_files` (list[str]), `open_issues` (list[str]), `next_steps` (list[str]).
+## 2. Universal Memory Tools
 
-### 8. Audit
-- `research_audit`: Full referential integrity, unverified claims, negative outcome, and artifact hash verification.
-  - Parameters: `project_id` (str, optional).
+### `memory_add`
+Atomically records a new universal memory.
+- **Parameters**:
+  - `project_id` (string, required): Target project.
+  - `type` (string, required): One of `knowledge`, `decision`, `hypothesis`, `observation`, `negative`, `reference`, `handoff`.
+  - `title` (string, required): Concise descriptive title.
+  - `content` (string, required): Markdown body content.
+  - `tags` (list[string], optional): Keywords/tags.
+  - `source_agent` (string, optional): Executing agent ID.
+  - `source_skill` (string, optional): Calling skill name.
+  - `source_ref` (string, optional): Provenance reference (DOI, run ID, commit hash, URL).
+  - `related_memory_ids` (list[string], optional): Related Memory IDs.
+  - `confidence` (float, optional): Subjective score (0.0 to 1.0).
+  - `vault_root` (string, optional)
+- **Returns**: `{"status": "success", "memory_id": "MEM-2026-0001", "file_path": "..."}`
+
+### `memory_get`
+Retrieves a memory record by ID.
+- **Parameters**:
+  - `project_id` (string, required)
+  - `memory_id` (string, required)
+  - `vault_root` (string, optional)
+- **Returns**: `{"status": "success", "memory_id": "...", "title": "...", "content": "...", ...}`
+
+### `memory_search`
+Searches memories within an isolated project (or across projects if `cross_project=True`).
+- **Parameters**:
+  - `project_id` (string, required): Project slug or `'*'` for cross-project.
+  - `query` (string, optional): Search keyword query.
+  - `type` (string, optional): Filter by memory type.
+  - `tags` (list[string], optional): Filter by tags.
+  - `status` (string, optional): Filter by `active`, `superseded`, or `archived`.
+  - `limit` (integer, default 20): Max search hits.
+  - `cross_project` (boolean, default False): Whether to search all projects.
+  - `vault_root` (string, optional)
+- **Returns**: `{"status": "success", "total_hits": 3, "hits": [{"memory_id": "...", "title": "...", "snippet": "...", "score": 15.0, ...}]}`
+
+### `memory_update`
+Safely updates title, content, confidence, tags, or status of an existing memory in place.
+- **Parameters**:
+  - `project_id` (string, required)
+  - `memory_id` (string, required)
+  - `title` (string, optional)
+  - `content` (string, optional)
+  - `tags` (list[string], optional)
+  - `confidence` (float, optional)
+  - `status` (string, optional)
+  - `related_memory_ids` (list[string], optional)
+  - `vault_root` (string, optional)
+
+### `memory_supersede`
+Supersedes an old memory with a new one when new evidence overturns historical findings.
+- **Parameters**:
+  - `project_id` (string, required)
+  - `old_memory_id` (string, required): ID of memory to supersede.
+  - `title` (string, required): Title of new memory.
+  - `content` (string, required): Markdown content of new memory.
+  - `reason` (string, required): Rationale for revising the historical conclusion.
+  - `type` (string, optional): Defaults to old memory type.
+  - `tags` (list[string], optional)
+  - `source_agent` (string, optional)
+  - `source_skill` (string, optional)
+  - `source_ref` (string, optional)
+  - `confidence` (float, optional)
+  - `vault_root` (string, optional)
+- **Returns**: `{"status": "success", "new_memory_id": "...", "superseded_id": "..."}`
+
+### `memory_archive`
+Moves a memory file to `archive/` and sets its status to `archived`.
+- **Parameters**:
+  - `project_id` (string, required)
+  - `memory_id` (string, required)
+  - `reason` (string, optional): Archival justification.
+  - `vault_root` (string, optional)
+
+---
+
+## 3. Context Builder Tool
+
+### `context_build`
+Constructs a token-budgeted, prioritized Markdown context pack for an agent.
+- **Parameters**:
+  - `project_id` (string, required)
+  - `task` (string, optional): Specific task description.
+  - `context_mode` (string, default "quick"): One of `quick`, `task`, `full`.
+  - `max_tokens` (integer, default 4000): Maximum allowable token budget.
+  - `vault_root` (string, optional)
+- **Returns**: `{"status": "success", "project_id": "...", "context_pack": "..."}`
+
+---
+
+## 4. Handoff Tools
+
+### `handoff_create`
+Records an agent shift handoff, updating `HANDOFF.md`, syncing `STATE.md`, and saving a permanent handoff memory.
+- **Parameters**:
+  - `project_id` (string, required)
+  - `task` (string, required)
+  - `completed_work` (list[string], optional)
+  - `current_progress` (string, optional)
+  - `important_findings` (list[string], optional)
+  - `decisions_made` (list[string], optional)
+  - `issues_encountered` (list[string], optional)
+  - `unresolved_items` (list[string], optional)
+  - `next_steps` (list[string], optional)
+  - `related_memory_ids` (list[string], optional)
+  - `related_files` (list[string], optional)
+  - `agent_id` (string, optional)
+  - `vault_root` (string, optional)
+
+### `handoff_get`
+Retrieves the latest `HANDOFF.md` text for a project.
+- **Parameters**:
+  - `project_id` (string, required)
+  - `vault_root` (string, optional)
+
+---
+
+## 5. Maintenance Tools
+
+### `index_rebuild`
+Scans all memory files in a project folder and completely regenerates `INDEX.md`.
+- **Parameters**:
+  - `project_id` (string, required)
+  - `vault_root` (string, optional)
+
+### `project_validate`
+Validates schemas of all memories, verifies internal links, and checks project folder health.
+- **Parameters**:
+  - `project_id` (string, required)
+  - `vault_root` (string, optional)

@@ -1,157 +1,113 @@
-"""Script to generate a realistic example ResearchVault."""
+"""Script to generate a realistic example ResearchVault using v2 Universal Memory."""
 
-from pathlib import Path
 import shutil
-import json
+from pathlib import Path
 
-from researchos.core.enums import (
-    ClaimStatus,
-    ExperimentOutcome,
-    PaperReadingStatus,
-    RunStatus,
-)
-from researchos.services.artifact_service import ArtifactService
-from researchos.services.claim_service import ClaimService
-from researchos.services.experiment_service import ExperimentService
-from researchos.services.finding_service import FindingService
-from researchos.services.handoff_service import HandoffService
-from researchos.services.paper_service import PaperService
-from researchos.services.project_service import ProjectService
-from researchos.services.run_service import RunService
+from researchos.core.context_builder import ContextBuilder
+from researchos.core.handoff_service import HandoffService
+from researchos.core.memory_service import MemoryService
+from researchos.core.project_service import ProjectService
+from researchos.models.memory import MemoryType
 
 
 def main() -> None:
     vault_dir = Path("examples/example-vault")
     if vault_dir.exists():
         shutil.rmtree(vault_dir)
+    vault_dir.mkdir(parents=True, exist_ok=True)
 
     p_svc = ProjectService(vault_dir)
-    p_svc.init_vault()
-
-    # Copy root AGENTS.md to vault root
-    shutil.copy2("AGENTS.md", vault_dir / "AGENTS.md")
+    m_svc = MemoryService(vault_dir)
+    h_svc = HandoffService(vault_dir)
+    c_bld = ContextBuilder(vault_dir)
 
     # 1. Create Project
-    proj = p_svc.create_project(
+    p_svc.create_project(
         name="Deep Residual Scaling Laws",
-        research_question="How does transformer layer width vs depth scale when parameter budget is held constant at 7B?",
-        objectives=[
-            "Train grid of 12 distinct aspect-ratio models",
-            "Compute Chinchilla-optimal compute frontiers",
+        project_id="deep-residual-scaling",
+        description="Scaling behavior of transformer layer width vs depth under fixed parameter budget.",
+        research_goal="Compute Chinchilla-optimal compute frontiers for width vs depth.",
+        tags=["scaling-laws", "transformers", "efficiency"],
+    )
+
+    # 2. Add Literature Reference
+    ref_mem = m_svc.add_memory(
+        project_id="deep-residual-scaling",
+        type=MemoryType.REFERENCE,
+        title="Training Compute-Optimal Large Language Models (Chinchilla)",
+        content="Hoffmann et al. (2022). Demonstrates tokens and parameters should be scaled in equal proportions.",
+        tags=["literature", "chinchilla"],
+        source_ref="arXiv:2203.15556",
+    )
+
+    # 3. Add Hypothesis
+    hyp_mem = m_svc.add_memory(
+        project_id="deep-residual-scaling",
+        type=MemoryType.HYPOTHESIS,
+        title="Deeper Architectures Yield Lower Perplexity at Fixed 7B Flops",
+        content="Doubling depth while halving hidden dimension width will yield strictly lower cross-entropy loss.",
+        tags=["hypothesis", "depth-width"],
+        related_memory_ids=[ref_mem.id],
+    )
+
+    # 4. Add Negative Experience
+    neg_mem = m_svc.add_memory(
+        project_id="deep-residual-scaling",
+        type=MemoryType.NEGATIVE,
+        title="Extreme Depth (>96 layers) Suffers Residual Dilution",
+        content="Models with depth > 96 fail to propagate early-layer gradients effectively without ReZero or LayerNorm tuning.",
+        tags=["pitfall", "architecture", "negative"],
+    )
+
+    # 5. Add Observation
+    obs_mem = m_svc.add_memory(
+        project_id="deep-residual-scaling",
+        type=MemoryType.OBSERVATION,
+        title="Optimal Depth-to-Width Ratio on 7B Frontier is 1:3.2",
+        content="Empirical frontier shows optimal tradeoff occurs at 48 layers with 4096 hidden width.",
+        tags=["empirical", "frontier"],
+        related_memory_ids=[hyp_mem.id, neg_mem.id],
+        confidence=0.94,
+    )
+
+    # 6. Add Decision
+    m_svc.add_memory(
+        project_id="deep-residual-scaling",
+        type=MemoryType.DECISION,
+        title="Adopt 48-Layer 4096-Width Configuration for Final Pretraining",
+        content="Selected 48-layer configuration based on empirical frontier and avoiding extreme depth instability.",
+        tags=["decision", "architecture"],
+        related_memory_ids=[obs_mem.id],
+    )
+
+    # 7. Record Agent Shift Handoff
+    h_svc.create_handoff(
+        project_id="deep-residual-scaling",
+        task="Ablation Analysis and Final Architecture Selection",
+        completed_work=[
+            "Trained 12 grid models across depth-width tradeoffs",
+            "Identified residual dilution breakdown beyond 96 layers",
+            "Derived optimal 1:3.2 ratio",
         ],
-    )
-
-    # 2. Create Paper
-    pap_svc = PaperService(vault_dir)
-    paper = pap_svc.create_paper(
-        title="Training Compute-Optimal Large Language Models",
-        citekey="hoffmann2022chinchilla",
-        authors=["Jordan Hoffmann", "Sebastian Borgeaud", "Arthur Mensch"],
-        year=2022,
-        abstract="We investigate the optimal model size and number of tokens for training a transformer under a compute budget.",
-        reading_status=PaperReadingStatus.SYNTHESIZED,
-        projects=[proj.id],
-    )
-
-    # 3. Create Experiment
-    e_svc = ExperimentService(vault_dir)
-    exp = e_svc.create_experiment(
-        project_id=proj.id,
-        title="Depth-to-Width Ratio Comparison at 100B Tokens",
-        hypothesis="Aspect ratio depth/width between 0.8 and 1.2 minimizes validation perplexity on pretraining corpora.",
-        method="Pretrain 7B models on 100B tokens using FlashAttention-2 with cosine decay schedule.",
-        literature=[paper.id],
-        planned_parameters={"tokens": "100B", "batch_size": 1024, "learning_rate": 3e-4, "seq_len": 4096},
-        expected_result="Validation loss lowest for 32-layer 4096-width configuration.",
-        success_criteria=["Training stability without gradient spikes", "Validation perplexity <= 8.5"],
-    )
-
-    # Preflight & Ready
-    e_svc.validate_preflight(exp.id)
-    e_svc.update_experiment(exp.id, {"status": "ready"})
-
-    # 4. Create Run
-    r_svc = RunService(vault_dir)
-    run = r_svc.create_run(
-        experiment_id=exp.id,
-        agent_name="claude-code",
-        executor_type="dsh",
-        server_id="srv_a100_node04",
-        working_directory="~/workspace/depth_width_exp001_claude_20261107",
-        environment={"cuda": "12.4", "framework": "pytorch-2.4"},
-    )
-
-    # 5. Create Artifact
-    dummy_metrics = vault_dir / "eval_perplexity_log.json"
-    dummy_metrics.write_text(
-        json.dumps({"val_loss": 1.98, "perplexity": 7.24, "tokens_processed": 100_000_000_000}),
-        encoding="utf-8",
-    )
-
-    art_svc = ArtifactService(vault_dir)
-    art = art_svc.register_artifact(
-        run_id=run.id,
-        path=str(dummy_metrics),
-        role="metrics",
-        name="final_evaluation_metrics.json",
-    )
-
-    # 6. Complete Run
-    r_svc.complete_run(
-        run_id=run.id,
-        status=RunStatus.SUCCEEDED,
-        actual_parameters={
-            "tokens": "100B",
-            "batch_size": 1024,
-            "learning_rate": 3e-4,
-            "seq_len": 4096,
-            "grad_clip": 1.0,
-        },
-        metrics={"val_loss": 1.98, "perplexity": 7.24},
-        result_summary="Pretraining reached 100B tokens with validation perplexity 7.24.",
-        experiment_outcome=ExperimentOutcome.POSITIVE,
-    )
-
-    # 7. Create Finding
-    find_svc = FindingService(vault_dir)
-    find_svc.create_finding(
-        project_id=proj.id,
-        experiment_id=exp.id,
-        run_id=run.id,
-        title="Aspect ratio 1.0 yields lowest perplexity under constant 7B compute budget.",
-        summary="Models with depth 32 and width 4096 outperformed narrower 48-layer or wider 20-layer counterparts by 0.3 PPL.",
-        evidence_artifacts=[art.id],
-        literature=[paper.id],
-    )
-
-    # 8. Create Claim
-    claim_svc = ClaimService(vault_dir)
-    claim_svc.create_claim(
-        project_id=proj.id,
-        text="Near-unity aspect ratios (depth/width ≈ 1.0) optimize token efficiency for 7B parameter dense transformers.",
-        status=ClaimStatus.SUPPORTED,
-        supporting_experiments=[exp.id],
-        supporting_runs=[run.id],
-        literature=[paper.id],
-        artifacts=[art.id],
-        limitations=["Evaluated only up to 100B tokens; asymptotic behavior at 1T+ tokens remains open."],
-        manuscript_section="Section 5: Optimal Aspect Ratio Scaling",
-    )
-
-    # 9. Update Handoff & Dashboard
-    h_svc = HandoffService(vault_dir)
-    h_svc.update_handoff(
-        project_id=proj.id,
-        current_focus="100B token pretraining baseline complete; ready for manuscript draft.",
-        completed_since_last=[
-            "Pretrained 32L-4096W configuration",
-            "Extracted finding FIND-2026-001",
+        current_progress="Final architecture selected (48 layers, 4096 width)",
+        important_findings=[
+            "Residual dilution causes instability in extreme depth",
+            "Optimal perplexity is 4.82 on Wikitext-103",
         ],
-        next_steps=["Agent C: Draft Section 5 of manuscript citing Claim CLAIM-2026-001"],
+        next_steps=[
+            "Launch full 100B token pretraining with FP8 precision",
+            "Monitor gradient norm stability during cosine decay",
+        ],
+        agent_id="lead-researcher",
     )
 
-    p_svc.generate_dashboards()
-    print("Example ResearchVault generated successfully at", vault_dir)
+    # 8. Rebuild index
+    p_svc.rebuild_index("deep-residual-scaling")
+
+    # 9. Verify Context Builder
+    pack = c_bld.build_context("deep-residual-scaling", context_mode="quick", max_tokens=3000)
+    print("Example Vault successfully created at:", vault_dir.resolve())
+    print("Generated Context Pack length:", len(pack))
 
 
 if __name__ == "__main__":

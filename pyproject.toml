@@ -1,7 +1,7 @@
 [project]
 name = "researchos"
-version = "0.1.0"
-description = "Autonomous, agent-agnostic scientific research management framework with persistent memory, experiment management, and evidence traceability."
+version = "2.0.0"
+description = "Universal, agent-independent, project-isolated, markdown-first long-term research memory system."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -23,8 +23,9 @@ dev = [
 ]
 
 [project.scripts]
-research = "researchos.adapters.cli:app"
-researchos-mcp = "researchos.adapters.mcp_server:main"
+researchos = "researchos.interfaces.cli.main:app"
+research = "researchos.interfaces.cli.main:app"
+researchos-mcp = "researchos.interfaces.mcp.server:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -38,3 +39,11 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]

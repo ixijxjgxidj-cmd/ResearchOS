@@ -1,111 +1,108 @@
-"""Test I: Complete end-to-end research workflow in an environment without Obsidian."""
+"""Test: Complete end-to-end research workflow in an environment without Obsidian."""
 
 from pathlib import Path
-from researchos.core.enums import (
-    ExperimentOutcome,
-    ExperimentStatus,
-    PaperReadingStatus,
-    RunStatus,
-)
-from researchos.services.artifact_service import ArtifactService
-from researchos.services.context_service import ContextService
-from researchos.services.experiment_service import ExperimentService
-from researchos.services.handoff_service import HandoffService
-from researchos.services.paper_service import PaperService
-from researchos.services.project_service import ProjectService
-from researchos.services.run_service import RunService
+
+from researchos.core.context_builder import ContextBuilder
+from researchos.core.handoff_service import HandoffService
+from researchos.core.memory_service import MemoryService
+from researchos.core.project_service import ProjectService
+from researchos.models.memory import MemoryType
 
 
 def test_complete_workflow_without_obsidian(tmp_path: Path):
     vault = tmp_path / "standalone_pure_markdown_vault"
 
-    # 1. Initialize vault without Obsidian
+    # 1. Initialize project without Obsidian
     p_svc = ProjectService(vault)
-    p_svc.init_vault()
-
-    # 2. Create Project
     proj = p_svc.create_project(
         name="Quantization Aware Training",
-        research_question="Can 4-bit INT4 quantization match FP16 perplexity?",
+        project_id="qat-study",
+        research_goal="Can 4-bit INT4 quantization match FP16 perplexity?",
     )
+    p_dir = Path(proj.project_dir)
 
-    # 3. Create Paper literature
-    pap_svc = PaperService(vault)
-    paper = pap_svc.create_paper(
+    # 2. Add Literature Reference
+    m_svc = MemoryService(vault)
+    ref_mem = m_svc.add_memory(
+        project_id="qat-study",
+        type=MemoryType.REFERENCE,
         title="LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale",
-        citekey="dettmers2022llmint8",
-        authors=["Tim Dettmers et al."],
-        year=2022,
-        reading_status=PaperReadingStatus.READ,
-        projects=[proj.id],
+        content="Paper DOI: 10.48550/arXiv.2208.07339. Authors: Tim Dettmers et al. (2022).",
+        tags=["literature", "quantization"],
+        source_ref="arXiv:2208.07339",
     )
 
-    # 4. Create Experiment
-    e_svc = ExperimentService(vault)
-    exp = e_svc.create_experiment(
-        project_id=proj.id,
+    # 3. Add Working Hypothesis
+    hyp_mem = m_svc.add_memory(
+        project_id="qat-study",
+        type=MemoryType.HYPOTHESIS,
+        title="SmoothQuant Calibration Hypothesis",
+        content="Per-channel scaling reduces outlier kurtosis below 3.0, preserving perplexity within 0.2 points of FP16.",
+        related_memory_ids=[ref_mem.id],
+    )
+
+    # 4. Add Empirical Observation
+    obs_mem = m_svc.add_memory(
+        project_id="qat-study",
+        type=MemoryType.OBSERVATION,
         title="SmoothQuant Calibration on LLaMA-7B",
-        hypothesis="Per-channel scaling reduces outlier kurtosis below 3.0.",
-        method="Apply per-tensor activation smoothing followed by INT4 weight quantization.",
-        literature=[paper.id],
-        planned_parameters={"bits": 4, "alpha": 0.5, "calibration_samples": 512},
-        expected_result="Perplexity degradation < 0.2 points",
-        success_criteria=["Wikitext perplexity <= 5.8"],
+        content="Per-tensor activation smoothing followed by INT4 weight quantization achieved 5.68 perplexity with 72% memory savings.",
+        tags=["benchmark", "positive"],
+        related_memory_ids=[hyp_mem.id],
+        confidence=0.95,
     )
 
-    # Preflight check and transition to ready
-    e_svc.validate_preflight(exp.id)
-    e_svc.update_experiment(exp.id, {"status": ExperimentStatus.READY})
-
-    # 5. Create Run and execute
-    r_svc = RunService(vault)
-    run = r_svc.create_run(
-        experiment_id=exp.id,
-        agent_name="standalone_agent",
-        executor_type="local",
+    # 5. Add Negative Experience
+    neg_mem = m_svc.add_memory(
+        project_id="qat-study",
+        type=MemoryType.NEGATIVE,
+        title="Static Per-Tensor Quantization Failure",
+        content="Static per-tensor INT4 quantization without smoothing causes perplexity degradation > 15 points due to outlier channels.",
+        tags=["pitfall", "negative"],
     )
 
-    # 6. Register Artifact
-    metrics_file = vault / "smoothquant_eval.json"
-    metrics_file.write_text('{"perplexity": 5.68, "memory_savings_ratio": 0.72}', encoding="utf-8")
-
-    art_svc = ArtifactService(vault)
-    art = art_svc.register_artifact(
-        run_id=run.id,
-        path=str(metrics_file),
-        role="metrics",
+    # 6. Add Architectural Decision
+    dec_mem = m_svc.add_memory(
+        project_id="qat-study",
+        type=MemoryType.DECISION,
+        title="Adopt Per-Channel Smoothing for Production Inference",
+        content="Based on observation and negative failure, standardizing on per-channel smoothing with alpha=0.5.",
+        related_memory_ids=[obs_mem.id, neg_mem.id],
     )
 
-    # 7. Complete Run
-    r_svc.complete_run(
-        run_id=run.id,
-        status=RunStatus.SUCCEEDED,
-        actual_parameters={"bits": 4, "alpha": 0.53, "calibration_samples": 512},
-        metrics={"perplexity": 5.68},
-        result_summary="INT4 SmoothQuant reached 5.68 perplexity with 72% memory savings.",
-        experiment_outcome=ExperimentOutcome.POSITIVE,
-    )
-
-    # 8. Update Handoff & Dashboard
+    # 7. Record Agent Shift Handoff
     h_svc = HandoffService(vault)
-    h_svc.update_handoff(
-        project_id=proj.id,
-        current_focus="SmoothQuant calibration validated; proceed to kernel acceleration.",
-        completed_since_last=[f"Ran experiment {exp.id} and achieved 5.68 perplexity"],
+    h_svc.create_handoff(
+        project_id="qat-study",
+        task="INT4 SmoothQuant Validation",
+        completed_work=["Validated smoothing hypothesis", "Logged pitfall on static per-tensor quantization"],
+        current_progress="Achieved 5.68 perplexity with INT4",
+        decisions_made=["Adopt per-channel smoothing"],
         next_steps=["Benchmark Triton INT4 GEMM kernels"],
+        agent_id="standalone-agent",
     )
-    p_svc.generate_dashboards()
 
-    # 9. Build Context Pack
-    ctx_svc = ContextService(vault)
-    pack = ctx_svc.build_context(exp.id)
+    # 8. Build Context Pack
+    cb = ContextBuilder(vault)
+    context_pack = cb.build_context("qat-study", context_mode="quick", max_tokens=3000)
 
-    # 10. Assertions: verify pure Markdown files are valid, self-contained, and parseable
-    assert (vault / "99-Dashboard" / "Projects.md").exists()
-    assert (vault / "99-Dashboard" / "Pending-Experiments.md").exists()
-    assert (vault / "99-Dashboard" / "Literature-Overview.md").exists()
-    assert (vault / "00-Projects" / proj.id / "STATUS.md").exists()
-    assert (vault / "00-Projects" / proj.id / "HANDOFF.md").exists()
-    assert "# Research Context Pack:" in pack
-    assert "dettmers2022llmint8" in pack
-    assert "5.68" in pack
+    assert "Quantization Aware Training" in context_pack
+    assert "Adopt Per-Channel Smoothing" in context_pack
+    assert "Static Per-Tensor Quantization Failure" in context_pack
+
+    # 9. Validate that files are standard Markdown on disk
+    assert (p_dir / "PROJECT.md").is_file()
+    assert (p_dir / "STATE.md").is_file()
+    assert (p_dir / "INDEX.md").is_file()
+    assert (p_dir / "HANDOFF.md").is_file()
+    assert (p_dir / "observations" / f"{obs_mem.id}.md").is_file()
+    assert (p_dir / "negative" / f"{neg_mem.id}.md").is_file()
+    assert (p_dir / "decisions" / f"{dec_mem.id}.md").is_file()
+    assert (p_dir / "references" / f"{ref_mem.id}.md").is_file()
+
+    # Rebuild index and validate project integrity
+    idx_res = p_svc.rebuild_index("qat-study")
+    assert idx_res["active_memories"] == 6  # 5 memories + 1 handoff memory
+    val_res = p_svc.validate_project("qat-study")
+    assert val_res["valid"] is True
+    assert val_res["broken_links"] == []

@@ -4,6 +4,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
+
 from huggingface_hub import HfApi, create_repo
 
 
@@ -49,7 +50,7 @@ def deploy_to_hf_space(token: str, space_id: str, is_private: bool = False) -> s
     space_url = f"https://huggingface.co/spaces/{space_id}"
     sse_url = f"https://{space_id.replace('/', '-')}.hf.space/sse"
     print("\n========================================================")
-    print(f"SUCCESS: Deployed to Hugging Face Spaces!")
+    print("SUCCESS: Deployed to Hugging Face Spaces!")
     print(f"Space Web URL:  {space_url}")
     print(f"MCP SSE URL:    {sse_url}")
     print("========================================================\n")

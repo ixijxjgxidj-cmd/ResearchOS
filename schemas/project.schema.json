@@ -1,127 +1,45 @@
 {
-  "$defs": {
-    "ProjectStatus": {
-      "enum": [
-        "active",
-        "paused",
-        "completed",
-        "archived"
-      ],
-      "title": "ProjectStatus",
-      "type": "string"
-    }
-  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ResearchOSProject",
+  "description": "Standard schema for ResearchOS PROJECT.md YAML frontmatter.",
+  "type": "object",
   "properties": {
-    "schema_version": {
-      "default": 1,
-      "description": "Schema version",
-      "title": "Schema Version",
-      "type": "integer"
+    "project_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_\\-]+$",
+      "description": "Unique project identifier"
     },
-    "id": {
-      "description": "Unique entity identifier",
-      "title": "Id",
-      "type": "string"
+    "project_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable project title"
     },
-    "kind": {
-      "const": "project",
-      "default": "project",
-      "title": "Kind",
-      "type": "string"
+    "description": {
+      "type": ["string", "null"],
+      "description": "Brief description of the project"
+    },
+    "research_goal": {
+      "type": ["string", "null"],
+      "description": "Core scientific or technical goal"
     },
     "created_at": {
-      "format": "date-time",
-      "title": "Created At",
-      "type": "string"
+      "type": "string",
+      "format": "date-time"
     },
     "updated_at": {
-      "format": "date-time",
-      "title": "Updated At",
-      "type": "string"
-    },
-    "name": {
-      "description": "Project title",
-      "title": "Name",
-      "type": "string"
+      "type": "string",
+      "format": "date-time"
     },
     "status": {
-      "$ref": "#/$defs/ProjectStatus",
+      "type": "string",
       "default": "active"
     },
-    "research_question": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Research Question"
-    },
-    "objectives": {
-      "items": {
-        "type": "string"
-      },
-      "title": "Objectives",
-      "type": "array"
-    },
-    "scope": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Scope"
-    },
-    "members": {
-      "items": {
-        "type": "string"
-      },
-      "title": "Members",
-      "type": "array"
-    },
-    "repositories": {
-      "items": {
-        "type": "string"
-      },
-      "title": "Repositories",
-      "type": "array"
-    },
-    "literature": {
-      "description": "Referenced Paper IDs",
-      "items": {
-        "type": "string"
-      },
-      "title": "Literature",
-      "type": "array"
-    },
-    "experiments": {
-      "description": "Child Experiment IDs",
-      "items": {
-        "type": "string"
-      },
-      "title": "Experiments",
-      "type": "array"
-    },
-    "claims": {
-      "description": "Project Claim IDs",
-      "items": {
-        "type": "string"
-      },
-      "title": "Claims",
-      "type": "array"
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
     }
   },
-  "required": [
-    "id",
-    "name"
-  ],
-  "title": "Project",
-  "type": "object"
+  "required": ["project_id", "project_name", "created_at", "updated_at", "status"],
+  "additionalProperties": false
 }

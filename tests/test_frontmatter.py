@@ -1,30 +1,34 @@
 """Tests for YAML frontmatter parsing, dumping, and atomic writing."""
 
 from pathlib import Path
-from researchos.storage.atomic_writer import atomic_write_text
-from researchos.storage.frontmatter import dump_frontmatter, parse_frontmatter
+
+from researchos.core.storage_service import (
+    atomic_write_text,
+    dump_frontmatter,
+    parse_frontmatter,
+)
 
 
 def test_frontmatter_parse_and_dump():
     meta = {
-        "schema_version": 1,
-        "id": "PRJ-2026-001",
-        "name": "Test Project",
+        "id": "MEM-2026-0001",
+        "project_id": "test-proj",
+        "type": "knowledge",
+        "title": "Test Memory",
         "status": "active",
-        "members": ["agent1", "agent2"],
+        "tags": ["agent1", "agent2"],
     }
-    body = "# Test Project\n\n## Background\nSome background info."
+    body = "# Test Memory\n\n## Background\nSome background info."
 
     raw = dump_frontmatter(meta, body)
     assert raw.startswith("---\n")
-    assert "schema_version: 1" in raw
-    assert "id: PRJ-2026-001" in raw
-    assert "# Test Project" in raw
+    assert "id: MEM-2026-0001" in raw
+    assert "# Test Memory" in raw
 
     parsed_meta, parsed_body = parse_frontmatter(raw)
-    assert parsed_meta["id"] == "PRJ-2026-001"
-    assert parsed_meta["members"] == ["agent1", "agent2"]
-    assert "# Test Project" in parsed_body
+    assert parsed_meta["id"] == "MEM-2026-0001"
+    assert parsed_meta["tags"] == ["agent1", "agent2"]
+    assert "# Test Memory" in parsed_body
     assert "Some background info." in parsed_body
 
 

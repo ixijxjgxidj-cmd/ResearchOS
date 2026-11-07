@@ -1,71 +1,81 @@
-"""Test H: CLI commands invocation and output formats."""
+"""Test: CLI commands invocation and output formats for v2 Universal Memory."""
 
 import json
 from pathlib import Path
+
 from typer.testing import CliRunner
-from researchos.adapters.cli import app
+
+from researchos.interfaces.cli.main import app
 
 runner = CliRunner()
 
 
-def test_cli_workflows(vault_dir: Path):
-    v_str = str(vault_dir)
+def test_cli_workflows(tmp_path: Path):
+    v_str = str(tmp_path / "vault")
 
     # 1. Project create with --json
-    res_p = runner.invoke(app, ["project", "create", "CLI Verification Project", "--vault", v_str, "--json"])
+    res_p = runner.invoke(app, ["project", "create", "CLI Verification Project", "--id", "cli-proj", "--vault", v_str, "--json"])
     assert res_p.exit_code == 0
     p_data = json.loads(res_p.stdout)
-    proj_id = p_data["id"]
-    assert proj_id.startswith("PRJ-")
+    assert p_data["frontmatter"]["project_id"] == "cli-proj"
 
     # 2. Project list
     res_list = runner.invoke(app, ["project", "list", "--vault", v_str])
     assert res_list.exit_code == 0
     assert "CLI Verification Project" in res_list.stdout
 
-    # 3. Experiment create
-    res_exp = runner.invoke(
+    # 3. Memory add
+    res_mem = runner.invoke(
         app,
         [
-            "experiment", "create", proj_id, "CLI Experiment",
-            "--exploratory",
-            "--params", '{"lr": 0.01}',
+            "memory", "add", "cli-proj",
+            "--type", "knowledge",
+            "--title", "CLI Transformer Insight",
+            "--content", "Transformers scale with parameter count and dataset size.",
+            "--tag", "nlp",
+            "--agent", "cli-agent",
             "--vault", v_str,
             "--json",
         ],
     )
-    assert res_exp.exit_code == 0
-    e_data = json.loads(res_exp.stdout)
-    exp_id = e_data["id"]
+    assert res_mem.exit_code == 0
+    m_data = json.loads(res_mem.stdout)
+    mem_id = m_data["frontmatter"]["id"]
+    assert mem_id.startswith("MEM-")
 
-    # 4. Run create
-    res_run = runner.invoke(app, ["run", "create", exp_id, "--agent", "cli-tester", "--vault", v_str, "--json"])
-    assert res_run.exit_code == 0
-    r_data = json.loads(res_run.stdout)
-    run_id = r_data["id"]
+    # 4. Memory get
+    res_get = runner.invoke(app, ["memory", "get", "cli-proj", mem_id, "--vault", v_str, "--json"])
+    assert res_get.exit_code == 0
+    m_get_data = json.loads(res_get.stdout)
+    assert m_get_data["frontmatter"]["title"] == "CLI Transformer Insight"
 
-    # 5. Run complete
-    res_comp = runner.invoke(
-        app,
-        [
-            "run", "complete", run_id,
-            "-p", '{"lr": 0.01, "epochs": 5}',
-            "-s", "succeeded",
-            "-o", "positive",
-            "--vault", v_str,
-            "--json",
-        ],
-    )
-    assert res_comp.exit_code == 0
+    # 5. Memory search
+    res_search = runner.invoke(app, ["memory", "search", "cli-proj", "--query", "Transformer", "--vault", v_str, "--json"])
+    assert res_search.exit_code == 0
+    hits = json.loads(res_search.stdout)
+    assert len(hits) >= 1
+    assert hits[0]["memory_id"] == mem_id
 
     # 6. Context build
-    res_ctx = runner.invoke(app, ["context", "build", exp_id, "--vault", v_str])
+    res_ctx = runner.invoke(app, ["context", "build", "cli-proj", "--mode", "quick", "--vault", v_str])
     assert res_ctx.exit_code == 0
-    assert "Research Context Pack" in res_ctx.stdout
+    assert "ResearchOS Context Pack" in res_ctx.stdout
     assert "CLI Verification Project" in res_ctx.stdout
 
-    # 7. Audit
-    res_audit = runner.invoke(app, ["audit", "--vault", v_str, "--json"])
-    assert res_audit.exit_code == 0
-    audit_data = json.loads(res_audit.stdout)
-    assert "status" in audit_data
+    # 7. Handoff create & get
+    res_handoff = runner.invoke(
+        app,
+        [
+            "handoff", "create", "cli-proj",
+            "--task", "CLI Verification Shift",
+            "--completed", "Verified all CLI commands",
+            "--progress", "All commands passed cleanly",
+            "--vault", v_str,
+            "--json",
+        ],
+    )
+    assert res_handoff.exit_code == 0
+
+    res_h_get = runner.invoke(app, ["handoff", "get", "cli-proj", "--vault", v_str])
+    assert res_h_get.exit_code == 0
+    assert "CLI Verification Shift" in res_h_get.stdout

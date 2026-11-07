@@ -1,53 +1,59 @@
-"""Tests for ID validation and generation."""
+"""Tests for Memory ID validation and generation."""
+
+from pathlib import Path
 
 import pytest
-from pathlib import Path
-from researchos.core.enums import IdPrefix
-from researchos.core.exceptions import ValidationError
-from researchos.core.ids import IdGenerator, is_valid_id, validate_id
+
+from researchos.utils.exceptions import ValidationError
+from researchos.utils.ids import (
+    MemoryIdGenerator,
+    is_valid_memory_id,
+    slugify_project_id,
+    validate_memory_id,
+)
 
 
-def test_id_validation():
-    assert is_valid_id("PRJ-2026-001")
-    assert is_valid_id("EXP-2026-105")
-    assert is_valid_id("RUN-2026-002")
-    assert is_valid_id("PAPER-2026-001")
-    assert is_valid_id("FIND-2026-001")
-    assert is_valid_id("CLAIM-2026-001")
-    assert is_valid_id("ART-2026-001")
-    assert is_valid_id("DEC-2026-001")
+def test_memory_id_validation():
+    assert is_valid_memory_id("MEM-2026-0001")
+    assert is_valid_memory_id("MEM-2026-105")
+    assert is_valid_memory_id("MEM-2025-0042")
 
-    assert not is_valid_id("INVALID-123")
-    assert not is_valid_id("PRJ-26-01")
-    assert not is_valid_id("EXP-2026-01")
+    assert not is_valid_memory_id("INVALID-123")
+    assert not is_valid_memory_id("MEM-26-01")
+    assert not is_valid_memory_id("PRJ-2026-001")
 
-    prefix, year, seq = validate_id("EXP-2026-042")
-    assert prefix == "EXP"
+    year, seq = validate_memory_id("MEM-2026-0042")
     assert year == 2026
     assert seq == 42
 
     with pytest.raises(ValidationError):
-        validate_id("invalid-id")
+        validate_memory_id("invalid-id")
 
 
-def test_id_generator(tmp_path: Path):
-    generator = IdGenerator(tmp_path)
-    id1 = generator.generate_id(IdPrefix.PROJECT, year=2026)
-    assert id1 == "PRJ-2026-001"
+def test_slugify_project():
+    assert slugify_project_id("My Deep Learning Project") == "my-deep-learning-project"
+    assert slugify_project_id("LLM_Agent & Memory!") == "llm-agent-memory"
+    assert slugify_project_id("   ") == "research-project"
 
-    id2 = generator.generate_id(IdPrefix.PROJECT, year=2026)
-    assert id2 == "PRJ-2026-002"
 
-    exp1 = generator.generate_id(IdPrefix.EXPERIMENT, year=2026)
-    assert exp1 == "EXP-2026-001"
+def test_memory_id_generator(tmp_path: Path):
+    proj_dir = tmp_path / "test-proj"
+    proj_dir.mkdir(parents=True)
+    generator = MemoryIdGenerator(proj_dir)
+
+    id1 = generator.next_memory_id(year=2026)
+    assert id1 == "MEM-2026-0001"
+
+    id2 = generator.next_memory_id(year=2026)
+    assert id2 == "MEM-2026-0002"
 
     # Verify disk scan fallback: if sequences file is deleted but files exist
-    exp_file = tmp_path / "00-Projects" / id1 / "Experiments" / "EXP-2026-005.md"
-    exp_file.parent.mkdir(parents=True, exist_ok=True)
-    exp_file.write_text("# EXP-2026-005")
+    obs_file = proj_dir / "observations" / "MEM-2026-0015.md"
+    obs_file.parent.mkdir(parents=True, exist_ok=True)
+    obs_file.write_text("# MEM-2026-0015", encoding="utf-8")
 
-    (tmp_path / ".researchos" / "sequences.json").unlink()
+    (proj_dir / ".researchos" / "sequences.json").unlink()
 
-    exp2 = generator.generate_id(IdPrefix.EXPERIMENT, year=2026)
-    # Next should be max(scanned=5) + 1 = 6
-    assert exp2 == "EXP-2026-006"
+    id3 = generator.next_memory_id(year=2026)
+    # Next should be max(scanned=15) + 1 = 16
+    assert id3 == "MEM-2026-0016"

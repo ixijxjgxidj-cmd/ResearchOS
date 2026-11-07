@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "UniversalResearchMemory",
+  "description": "Standard schema for ResearchOS Universal Memory YAML frontmatter.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^MEM-\\d{4}-\\d{3,}$",
+      "description": "Unique Memory Identifier"
+    },
+    "project_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_\\-]+$",
+      "description": "Parent project directory slug or identifier"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "knowledge",
+        "decision",
+        "hypothesis",
+        "observation",
+        "negative",
+        "reference",
+        "handoff"
+      ],
+      "description": "Universal memory classification"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Concise descriptive title"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 creation timestamp"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 update timestamp"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "superseded", "archived"],
+      "default": "active"
+    },
+    "source_agent": {
+      "type": ["string", "null"],
+      "description": "Identifier of the agent that produced this memory"
+    },
+    "source_skill": {
+      "type": ["string", "null"],
+      "description": "Skill that invoked ResearchOS"
+    },
+    "source_ref": {
+      "type": ["string", "null"],
+      "description": "Provenance identifier, DOI, commit hash, or external URL"
+    },
+    "confidence": {
+      "type": ["number", "null"],
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Subjective confidence score (0.0 to 1.0)"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "related": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "description": "List of related Memory IDs"
+    },
+    "supersedes": {
+      "type": ["string", "null"],
+      "description": "ID of previous memory superseded by this record"
+    }
+  },
+  "required": ["id", "project_id", "type", "title", "created_at", "updated_at", "status"],
+  "additionalProperties": false
+}

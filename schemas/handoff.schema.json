@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ResearchOSHandoff",
+  "description": "Schema for inter-agent shift handoff input payload.",
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "Target project identifier"
+    },
+    "task": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Current task context"
+    },
+    "completed_work": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "current_progress": {
+      "type": ["string", "null"]
+    },
+    "important_findings": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "decisions_made": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "issues_encountered": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "unresolved_items": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "next_steps": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "related_memory_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "related_files": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "agent_id": {
+      "type": ["string", "null"]
+    }
+  },
+  "required": ["project_id", "task"],
+  "additionalProperties": false
+}

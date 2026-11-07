@@ -1,58 +1,45 @@
-# ResearchOS Multi-Agent Scientific Workflow Guide
+# ResearchOS Memory Workflow Guide
 
-## 1. The Multi-Agent Collaboration Lifecycle
-
-ResearchOS coordinates multiple AI agents across extended temporal horizons through a standard 6-stage lifecycle:
+ResearchOS acts as the universal shared memory substrate across distinct research agents and skills.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor A as Agent A (Planner)
-    actor B as Agent B (Executor)
-    actor C as Agent C (Writer)
-    participant V as ResearchVault (Markdown)
-    participant G as gpu-server-management (Skill)
-    participant D as DSH (GPU Infrastructure)
+    actor User as Researcher
+    participant Agent as Research Agent
+    participant MCP as ResearchOS MCP / CLI
+    participant Memory as ResearchVault (<project_id>)
+    participant Skill as External Scientific Skill
 
-    Note over A,V: Phase 1: Problem Formulation & Planning
-    A->>V: research_project_create("Sparse Autoencoders")
-    A->>V: research_paper_create("Towards Monosemanticity")
-    A->>V: research_experiment_create("SAE L1 Lambda Search")
-    A->>V: research_experiment_validate (Preflight check)
-    A->>V: research_handoff_update ("Design finished, ready for execution")
-
-    Note over B,V: Phase 2: Execution & Infrastructure Lease
-    B->>V: research_context_build(EXP_ID)
-    B->>G: Activate skill: gpu-server-management
-    G->>D: claim_server(srv_a100_01, duration=120)
-    B->>V: research_run_create(EXP_ID, agent="codex", executor="dsh")
-    Note over B,D: Runs training in ~/workspace/{session}_{agent}_{time}
-    B->>V: research_artifact_register(RUN_ID, "weights.pt", "checkpoint")
-    G->>D: plan_server_backup(srv_a100_01)
-    G->>D: release_server(srv_a100_01)
-    B->>V: research_run_complete(RUN_ID, actual_params, outcome="positive")
-    B->>V: research_finding_create("L1 0.01 yielded 96% alive latents")
-    B->>V: research_handoff_update("Execution complete; ready for manuscript")
-
-    Note over C,V: Phase 3: Manuscript Writing & Audit
-    C->>V: research_context_build(PRJ_ID)
-    C->>V: research_claim_create("SAE features are monosemantic")
-    C->>V: research_audit(PRJ_ID)
-    C-->>V: Generates paper sections with verified evidence links
+    User->>Agent: "Explore FP8 quantization on LLaMA-3"
+    Agent->>MCP: context_build(project_id="llama3-quant", task="FP8")
+    MCP->>Memory: Read PROJECT.md, STATE.md, HANDOFF.md, negative/
+    Memory-->>MCP: Context Pack
+    MCP-->>Agent: Token-budgeted context pack with source file references
+    Agent->>Skill: Run FP8 calibration experiment
+    Skill-->>Agent: Result: Diverges on LayerNorm; Succeeds with FP32 norm
+    Agent->>MCP: memory_add(type="negative", title="FP8 LayerNorm Divergence")
+    MCP->>Memory: Write negative/MEM-2026-0001.md & update INDEX.md
+    Agent->>MCP: memory_add(type="observation", title="Hybrid FP8/FP32 Convergence")
+    MCP->>Memory: Write observations/MEM-2026-0002.md & update INDEX.md
+    Agent->>MCP: handoff_create(task="FP8 calibration", progress="Hybrid norm validated")
+    MCP->>Memory: Update HANDOFF.md & STATE.md
+    Agent-->>User: "Completed calibration and recorded findings into vault."
 ```
 
 ---
 
-## 2. Preventing Common Multi-Agent Traps
+## Workflow Steps
 
-### 2.1 The Context Amnesia Trap
-- **Problem**: When a new session begins or context is compressed, agents forget why an experiment was conducted, what previous runs showed, or where checkpoints are.
-- **Solution**: Incoming agents always call `research context build <EXP-ID>` to re-hydrate the essential plan, hypothesis, prior runs, deviations, and warnings.
-
-### 2.2 The Silent Overwrite Trap
-- **Problem**: Agent B modifies hyperparameters or overwrites files produced by Agent A without leaving an audit trail.
-- **Solution**: Optimistic concurrency control via file locking and version checking (`VersionConflictError`), combined with dedicated isolated workspace directories (`~/workspace/{session}_{agent}_{time}`).
-
-### 2.3 The Negative Outcome Suppression Trap
-- **Problem**: When a run disproves a hypothesis, agents delete the experiment or falsely label it as a code crash.
-- **Solution**: Strict distinction between `status: failed` (code crash) and `outcome: negative` (scientific hypothesis disproven). The `Research-Audit` engine alerts if negative outcomes are unreferenced in limitation sections.
+1. **Project Setup**:
+   Create a project directory using `project_create`.
+2. **Context Ingestion**:
+   At session start, retrieve distilled context via `context_build`.
+3. **External Task Execution**:
+   External skills handle GPU scheduling, training, literature analysis, etc.
+4. **Memory Recording**:
+   Agent calls `memory_add` to commit observations, decisions, hypotheses, negative lessons, and references.
+5. **Memory Revision**:
+   When new data contradicts older findings, agent calls `memory_supersede`.
+6. **Agent Shift Transition**:
+   Agent calls `handoff_create` to preserve state for the next session.
