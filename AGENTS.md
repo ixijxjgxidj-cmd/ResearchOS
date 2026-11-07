@@ -55,5 +55,5 @@ flowchart TD
 ## 3. Tool Calling Hierarchy
 
 - Scientific experiment management, literature tracking, and context packs: **Call ResearchOS MCP / CLI**.
-- GPU server discovery, scheduling, claiming, and remote backups: **Call DSH MCP**.
+- GPU server discovery, scheduling, claiming (`claim_server`), and remote backups (`plan_server_backup`): **Always call existing DSH MCP (`dsh-mcp-server`) directly via the `gpu-server-management` skill. Never create or use duplicate server management tools.**
 - Local code execution and file inspection: **Use workspace tools**.

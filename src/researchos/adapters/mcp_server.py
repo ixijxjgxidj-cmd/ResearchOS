@@ -276,7 +276,7 @@ def research_experiment_validate(experiment_id: str, vault_root: str | None = No
 
 
 # 3. Run Tools
-@mcp.tool(description="Spawns an execution run for an experiment, recording agent identity and execution host.")
+@mcp.tool(description="Spawns an execution run for an experiment. For remote GPU runs, claim server via existing DSH MCP (claim_server) and record server_id/task lease here.")
 def research_run_create(
     experiment_id: str,
     agent_name: str,
@@ -338,7 +338,7 @@ def research_run_get(run_id: str, vault_root: str | None = None) -> dict[str, An
         return {"status": "error", "error": str(exc)}
 
 
-@mcp.tool(description="Updates intermediate run telemetry, working directory, or environment fingerprints.")
+@mcp.tool(description="Updates intermediate run telemetry, working directory, DSH server_id/task lease, or environment fingerprints.")
 def research_run_update(run_id: str, updates: dict[str, Any], vault_root: str | None = None) -> dict[str, Any]:
     try:
         _, _, r_svc, *_ = get_services(vault_root)
