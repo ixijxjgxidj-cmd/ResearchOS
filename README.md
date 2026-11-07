@@ -1,3 +1,13 @@
+---
+title: ResearchOS MCP
+emoji: 🔬
+colorFrom: indigo
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # ResearchOS
 
 **面向多 Agent 科研工作流的持久化记忆、实验管理与证据追溯框架**

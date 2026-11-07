@@ -1,4 +1,4 @@
-# ResearchOS Remote MCP Server Dockerfile
+# ResearchOS MCP Server Dockerfile for Hugging Face Spaces & Container Cloud
 FROM python:3.12-slim
 
 # Install system dependencies
@@ -9,6 +9,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install uv for fast dependency management
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Set up standard non-root user (UID 1000) for Hugging Face Spaces
+RUN useradd -m -u 1000 user
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH
 
 WORKDIR /app
 
@@ -25,16 +30,18 @@ COPY templates/ ./templates/
 COPY skills/ ./skills/
 COPY AGENTS.md ./AGENTS.md
 
-# Set default ResearchVault path inside the container
+# Pre-create /data/vault directory with correct ownership for HF Persistent Storage
+RUN mkdir -p /data/vault && chown -R user:user /app /data
+
+USER user
+
+# Default Hugging Face Spaces settings
 ENV RESEARCH_VAULT_ROOT=/data/vault
 ENV MCP_TRANSPORT=sse
 ENV MCP_HOST=0.0.0.0
-ENV PORT=8000
+ENV PORT=7860
 
-# Mountable volume for Markdown ResearchVault
-VOLUME ["/data/vault"]
+EXPOSE 7860
 
-EXPOSE 8000
-
-# Start MCP Server with SSE/HTTP transport for remote agent hosting
+# Start MCP Server with SSE transport
 CMD ["python", "-m", "researchos.adapters.mcp_server"]
