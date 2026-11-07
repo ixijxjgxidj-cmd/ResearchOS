@@ -11,6 +11,7 @@ sequenceDiagram
     actor B as Agent B (Executor)
     actor C as Agent C (Writer)
     participant V as ResearchVault (Markdown)
+    participant G as gpu-server-management (Skill)
     participant D as DSH (GPU Infrastructure)
 
     Note over A,V: Phase 1: Problem Formulation & Planning
@@ -22,12 +23,13 @@ sequenceDiagram
 
     Note over B,V: Phase 2: Execution & Infrastructure Lease
     B->>V: research_context_build(EXP_ID)
-    B->>D: claim_server(srv_a100_01, duration=120)
+    B->>G: Activate skill: gpu-server-management
+    G->>D: claim_server(srv_a100_01, duration=120)
     B->>V: research_run_create(EXP_ID, agent="codex", executor="dsh")
-    Note over B,D: Runs training in ~/workspace/...
+    Note over B,D: Runs training in ~/workspace/{session}_{agent}_{time}
     B->>V: research_artifact_register(RUN_ID, "weights.pt", "checkpoint")
-    B->>D: plan_server_backup(srv_a100_01)
-    B->>D: release_server(srv_a100_01)
+    G->>D: plan_server_backup(srv_a100_01)
+    G->>D: release_server(srv_a100_01)
     B->>V: research_run_complete(RUN_ID, actual_params, outcome="positive")
     B->>V: research_finding_create("L1 0.01 yielded 96% alive latents")
     B->>V: research_handoff_update("Execution complete; ready for manuscript")

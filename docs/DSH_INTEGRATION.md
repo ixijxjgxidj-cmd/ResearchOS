@@ -7,8 +7,8 @@ Infrastructure lifecycle management belongs entirely to **DSH** (Distributed Ser
 - DSH MCP Endpoint: `https://dsh-mcp-server.hulkcheng0806.workers.dev/`
 - Reference Skill: `gpu-server-management` (`C:\Users\hulk cheng\.gemini\config\skills\gpu-server-management\SKILL.md`)
 
-AI Agents simultaneously connect to **ResearchOS MCP** (for scientific memory, plans, runs, artifacts, claims) and **DSH MCP** (for GPU server discovery, leasing, execution workspace, and remote 3-tier backups).
-The coordination happens in the Agent Workflow Layer (governed by `skills/experiment-execution/SKILL.md`).
+AI Agents simultaneously connect to **ResearchOS MCP** (for scientific memory, plans, runs, artifacts, claims) and **DSH MCP** (driven directly through the user's existing **`gpu-server-management`** skill).
+The coordination happens in the Agent Workflow Layer: `skills/experiment-execution/SKILL.md` directly invokes the **`gpu-server-management`** skill for compute node leasing, isolated workspace setup, and 3-tier backups, binding the resulting IDs (`server_id`, `server_task_id`, `working_directory`, `backup_reference`) to ResearchOS Run records.
 
 ---
 
