@@ -37,6 +37,27 @@ mcp = MCPServer(
 )
 
 
+@mcp.custom_route("/", methods=["GET"])
+async def root_endpoint(request: Any) -> Any:
+    from starlette.responses import JSONResponse
+    return JSONResponse({
+        "status": "healthy",
+        "service": "ResearchOS MCP Server",
+        "version": "0.1.0",
+        "endpoints": {
+            "sse": "/sse",
+            "messages": "/messages/",
+            "health": "/health",
+        },
+    })
+
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health_endpoint(request: Any) -> Any:
+    from starlette.responses import JSONResponse
+    return JSONResponse({"status": "ok"})
+
+
 def get_services(vault_root: str | None = None) -> tuple[
     ProjectService,
     ExperimentService,
