@@ -12,11 +12,27 @@ The coordination happens in the Agent Workflow Layer: `skills/experiment-executi
 
 ---
 
-## 2. Actual DSH MCP Tools Reference
+## 2. Server Selection Scope & Graceful Local Fallback
+
+### 2.0 Trigger Conditions & Fallback Protocol
+1. **Scope of Compute Nodes**:
+   - DSH is NOT limited to GPUs. It manages all remote compute nodes, including **CPU nodes** (e.g. 8-core Vultr, IBM LinuxONE s390x), **GPU accelerators** (RTX 4090, A100, T4), or **specifically designated locations** (e.g. "deploy to Fujian VPS", "run on Tokyo server").
+2. **Graceful Degradation / Local Fallback Protocol**:
+   - If `get_servers` returns no matching or online nodes (or if all candidates are occupied, offline, or DSH MCP is temporarily unavailable):
+   - **The Agent MUST NOT halt or fail**.
+   - Instead, the Agent **gracefully degrades and falls back to local execution**:
+     - `executor_type`: `"local"`.
+     - `working_directory`: `./runs/{RUN-ID}/` (local isolated folder).
+     - `deviations`: `["Fallback to local execution: no available remote server in DSH MCP matching requirements"]`.
+     - The scientific experiment proceeds uninterrupted on the local host.
+
+---
+
+## 3. Actual DSH MCP Tools Reference
 
 The following tool schemas are directly extracted and verified from the official DSH MCP server specification.
 
-### 2.1 Server Discovery: `get_servers`
+### 3.1 Server Discovery: `get_servers`
 - **Purpose**: Reads the current pool status, load metrics, available GPU models, active leases, and pre-cached datasets.
 - **Parameters**:
   - `gpu_model` (string, optional): e.g., `"NVIDIA A100"`, `"RTX 4090"`.

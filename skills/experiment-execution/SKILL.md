@@ -18,38 +18,57 @@ Governs the physical or remote execution of an experimental run, ensuring strict
 
 ## Step-by-Step Procedure
 
-### 1. Remote GPU Compute & Infrastructure Lifecycle (Skill: `gpu-server-management`)
-If the experiment requires remote GPU compute (e.g. training, fine-tuning, heavy inference):
-**The Agent MUST activate and follow the standard 5-step lifecycle in the `gpu-server-management` skill**:
+### 1. Compute Infrastructure Selection & Local Fallback Protocol
+Whenever a remote server is needed — **whether CPU or GPU compute**, or when the user/task **explicitly specifies where to run** (e.g., "deploy to Fujian VPS", "run on London node", "use LinuxONE", "use A100 GPU"):
 
-1. **Read the pool (`get_servers`)**:
-   Check online status, free VRAM, `current_task` (busy check), and cached datasets. Optionally call `plan_task_allocation` to utilize **Dataset Affinity** (+100,000 score boost).
-2. **Claim with optional Countdown (`claim_server`)**:
-   ```yaml
-   claim_server:
-     server_id: "<target-server-id>"
-     agent: "<your-agent-identifier>"       # e.g., "claude-code", "antigravity"
-     task: "<task-summary-and-exp-id>"     # e.g., "EXP-2026-001 lora training"
-     duration_minutes: 120                  # Countdown lease timer
-   ```
-3. **Workspace Isolation (Mandatory DSH Protocol)**:
-   Strictly create the dedicated isolated workspace before executing any code:
-   ```bash
-   mkdir -p ~/workspace/{session_name}_{agent_name}_{YYYYMMDD_HHMMSS}
-   cd ~/workspace/{session_name}_{agent_name}_{YYYYMMDD_HHMMSS}
-   ```
-   All code clones, environments, scripts, checkpoints, and intermediate logs must reside strictly inside this workspace.
+1. **Query DSH MCP (`get_servers`)**:
+   - Check available servers in the DSH cluster pool:
+     - If specific server location or name is designated: match `name`, `host`, or `tags`.
+     - If GPU required: filter by `gpu_model` or `min_gpu_memory_gb`.
+     - If CPU required: filter by `cpu_cores` / `ram_gb` / `tags`.
+   - Verify server is online and idle (`current_task == null` or lease expired).
+   - Or call `plan_task_allocation` to utilize **Dataset Affinity** (+100,000 score boost).
+
+2. **Graceful Degradation / Local Fallback Protocol**:
+   > [!IMPORTANT]
+   > **When no matching server is available** (all matching nodes are busy/occupied, offline, absent from the DSH pool, or DSH MCP is unreachable):
+   > - **DO NOT halt or fail the research run**.
+   > - **Gracefully degrade and fall back to local execution**:
+   >   - Set `executor_type = "local"`.
+   >   - Set `server_id = null`, `infrastructure_provider = "local_host"`.
+   >   - Create an isolated local run workspace: `./runs/{RUN-ID}/` or `~/workspace/{session}_{agent}_{time}`.
+   >   - Document the fallback reason in `deviations`:
+   >     `deviations: ["Fallback to local execution: no available server in DSH MCP matching requirements"]`.
+   >   - Proceed directly to Step 3 (Execute & Record Actual Telemetry) on the local host.
+
+3. **Remote Server Lifecycle (Skill: `gpu-server-management`)**:
+   **If a suitable server IS available in DSH MCP**:
+   The Agent activates the standard 5-step lifecycle from `gpu-server-management`:
+   - **Claim Server (`claim_server`)**:
+     ```yaml
+     claim_server:
+       server_id: "<target-server-id>"
+       agent: "<your-agent-identifier>"       # e.g., "claude-code", "antigravity"
+       task: "<task-summary-and-exp-id>"     # e.g., "EXP-2026-001 lora training"
+       duration_minutes: 120                  # Optional countdown lease timer
+     ```
+   - **Workspace Isolation (Mandatory DSH Protocol)**:
+     ```bash
+     mkdir -p ~/workspace/{session_name}_{agent_name}_{YYYYMMDD_HHMMSS}
+     cd ~/workspace/{session_name}_{agent_name}_{YYYYMMDD_HHMMSS}
+     ```
+     All code clones, environments, scripts, checkpoints, and intermediate logs must reside strictly inside this workspace.
 
 ---
 
 ### 2. Initialize ResearchOS Run Record
-Simultaneously bind the compute lease to the scientific record by calling ResearchOS MCP `research_run_create`:
+Simultaneously bind the execution details to the scientific record by calling ResearchOS MCP `research_run_create`:
 - `experiment_id`: Target experiment ID (e.g. `EXP-2026-001`).
 - `agent_name`: Name or model identifier of the executing agent.
-- `executor_type`: `"dsh"` (for remote GPU runs) or `"local"`.
-- `server_id`: The `server_id` claimed via `gpu-server-management`.
-- `server_task_id`: The task lease description used in `claim_server`.
-- `working_directory`: The isolated `~/workspace/...` path created above.
+- `executor_type`: `"dsh"` (if running on claimed server) or `"local"` (if running locally or fell back).
+- `server_id`: The `server_id` claimed via `gpu-server-management` (or `null` if local).
+- `server_task_id`: The lease task description used in `claim_server` (or `null` if local).
+- `working_directory`: The isolated workspace path (remote `~/workspace/...` or local `./runs/{RUN-ID}`).
 - `code_repository`: Git repository path or remote URL.
 - `code_commit`: Current Git commit hash (`git rev-parse HEAD`).
 

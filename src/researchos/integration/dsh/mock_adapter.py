@@ -15,6 +15,8 @@ class MockDSHAdapter:
                 "host": "192.168.1.101",
                 "gpu_model": "NVIDIA A100-SXM4-80GB",
                 "gpu_count": 8,
+                "cpu_cores": 32,
+                "ram_gb": 128,
                 "free_gpu_memory_gb": 80,
                 "current_task": None,
                 "current_agent": None,
@@ -26,7 +28,35 @@ class MockDSHAdapter:
                 "host": "192.168.1.102",
                 "gpu_model": "NVIDIA GeForce RTX 4090",
                 "gpu_count": 2,
+                "cpu_cores": 16,
+                "ram_gb": 64,
                 "free_gpu_memory_gb": 24,
+                "current_task": None,
+                "current_agent": None,
+                "datasets": [],
+            },
+            "srv_cpu_linuxone": {
+                "server_id": "srv_cpu_linuxone",
+                "name": "IBM-LinuxONE-s390x",
+                "host": "148.100.77.57",
+                "gpu_model": None,
+                "gpu_count": 0,
+                "cpu_cores": 8,
+                "ram_gb": 32,
+                "free_gpu_memory_gb": 0,
+                "current_task": None,
+                "current_agent": None,
+                "datasets": [],
+            },
+            "srv_cpu_vultr": {
+                "server_id": "srv_cpu_vultr",
+                "name": "London-Vultr-8C16G",
+                "host": "45.76.131.243",
+                "gpu_model": None,
+                "gpu_count": 0,
+                "cpu_cores": 8,
+                "ram_gb": 16,
+                "free_gpu_memory_gb": 0,
                 "current_task": None,
                 "current_agent": None,
                 "datasets": [],
@@ -39,13 +69,22 @@ class MockDSHAdapter:
         self,
         gpu_model: str | None = None,
         min_gpu_memory_gb: float | None = None,
+        min_cpu_cores: int | None = None,
+        server_name_or_keyword: str | None = None,
         include_offline: bool = False,
     ) -> list[dict[str, Any]]:
         results = []
         for s in self.servers.values():
-            if gpu_model and gpu_model.lower() not in s["gpu_model"].lower():
+            if server_name_or_keyword:
+                kw = server_name_or_keyword.lower()
+                if kw not in s["name"].lower() and kw not in s["host"].lower():
+                    continue
+            if gpu_model:
+                if not s.get("gpu_model") or gpu_model.lower() not in s["gpu_model"].lower():
+                    continue
+            if min_gpu_memory_gb and s.get("free_gpu_memory_gb", 0) < min_gpu_memory_gb:
                 continue
-            if min_gpu_memory_gb and s["free_gpu_memory_gb"] < min_gpu_memory_gb:
+            if min_cpu_cores and s.get("cpu_cores", 0) < min_cpu_cores:
                 continue
             results.append(s)
         return results

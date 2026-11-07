@@ -30,7 +30,7 @@ Prevents wasted compute and ungrounded execution by designing experiments thorou
 
 3. **Populate Storage & Execution Details**:
    - In the generated `00-Projects/{PRJ-ID}/Experiments/{EXP-ID}.md`:
-     - Under `## 5. Where`: Specify whether this runs locally or on remote GPU servers via the gpu-server-management skill (leveraging Dataset Affinity routing if datasets are pre-cached).
+     - Under `## 5. Where`: Specify compute requirements (CPU vs GPU, memory, architecture) or designated server location. State fallback: if no matching remote server is available in DSH MCP at runtime, gracefully fallback to local execution.
      - Under `## 6. Storage`: Design the directory path where raw artifacts and checkpoints will be saved.
 
 4. **Run Preflight Validation**:
