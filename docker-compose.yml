@@ -1,0 +1,18 @@
+services:
+  researchos-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: researchos:latest
+    container_name: researchos-mcp
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - MCP_TRANSPORT=sse
+      - MCP_HOST=0.0.0.0
+      - PORT=8000
+      - RESEARCH_VAULT_ROOT=/data/vault
+    volumes:
+      # Maps local directory to container vault for persistent Markdown storage
+      - ./my_research_vault:/data/vault

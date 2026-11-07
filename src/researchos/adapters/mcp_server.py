@@ -1,6 +1,9 @@
 """Official Model Context Protocol (MCP) server for ResearchOS."""
 
+import argparse
 import json
+import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -631,8 +634,34 @@ def research_audit(project_id: str | None = None, vault_root: str | None = None)
 
 
 def main() -> None:
-    """Entry point for STDIO MCP server."""
-    mcp.run("stdio")
+    """Entry point for ResearchOS MCP server (supports STDIO, SSE, and Streamable-HTTP)."""
+    parser = argparse.ArgumentParser(description="ResearchOS MCP Server")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse", "streamable-http"],
+        default=os.environ.get("MCP_TRANSPORT", "stdio"),
+        help="MCP transport protocol (default: stdio, sse, streamable-http)",
+    )
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("MCP_HOST", "0.0.0.0"),
+        help="Host to bind for HTTP/SSE (default: 0.0.0.0)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("PORT", os.environ.get("MCP_PORT", "8000"))),
+        help="Port to bind for HTTP/SSE (default: 8000 or $PORT)",
+    )
+
+    args, _ = parser.parse_known_args()
+
+    if args.transport == "sse":
+        mcp.run("sse", host=args.host, port=args.port)
+    elif args.transport == "streamable-http":
+        mcp.run("streamable-http", host=args.host, port=args.port)
+    else:
+        mcp.run("stdio")
 
 
 if __name__ == "__main__":
