@@ -678,9 +678,23 @@ def main() -> None:
     args, _ = parser.parse_known_args()
 
     if args.transport == "sse":
-        mcp.run("sse", host=args.host, port=args.port)
+        from mcp.server.transport_security import TransportSecuritySettings
+
+        mcp.run(
+            "sse",
+            host=args.host,
+            port=args.port,
+            transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+        )
     elif args.transport == "streamable-http":
-        mcp.run("streamable-http", host=args.host, port=args.port)
+        from mcp.server.transport_security import TransportSecuritySettings
+
+        mcp.run(
+            "streamable-http",
+            host=args.host,
+            port=args.port,
+            transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+        )
     else:
         mcp.run("stdio")
 
