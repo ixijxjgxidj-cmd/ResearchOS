@@ -9,6 +9,8 @@ from researchos.config.settings import Settings
 from researchos.core.context_builder import ContextBuilder
 from researchos.core.handoff_service import HandoffService
 from researchos.core.memory_service import MemoryService
+from researchos.core.paper_service import PaperService
+from researchos.core.project_memory_service import ProjectMemoryService
 from researchos.core.project_service import ProjectService
 from researchos.core.retrieval_service import RetrievalService
 from researchos.utils.exceptions import ResearchOSError
@@ -36,8 +38,41 @@ async def root_endpoint(request: Any) -> Any:
 
 @mcp.custom_route("/health", methods=["GET"])
 async def health_endpoint(request: Any) -> Any:
+    """Deep healthcheck: verifies persistent storage exists and is writable."""
+    import time
+
     from starlette.responses import JSONResponse
-    return JSONResponse({"status": "ok"})
+
+    vault_root = None
+    try:
+        vault_root = Settings.discover_vault_root()
+        if not vault_root.exists():
+            vault_root.mkdir(parents=True, exist_ok=True)
+
+        probe_file = vault_root / f".health_probe_{int(time.time() * 1000)}.tmp"
+        probe_file.write_text("health_ok\n", encoding="utf-8")
+        if probe_file.exists():
+            probe_file.unlink()
+
+        return JSONResponse({
+            "status": "healthy",
+            "service": "ResearchOS MCP Server",
+            "version": "2.0.0",
+            "vault_root": str(vault_root),
+            "storage_writable": True,
+        })
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "status": "unhealthy",
+                "service": "ResearchOS MCP Server",
+                "version": "2.0.0",
+                "vault_root": str(vault_root) if vault_root else "unresolved",
+                "storage_writable": False,
+                "error": str(exc),
+            },
+            status_code=503,
+        )
 
 
 def get_core_services(vault_root: str | None = None) -> tuple[
@@ -162,11 +197,17 @@ def memory_add(
     title: str,
     content: str,
     tags: list[str] | None = None,
+    source_type: str | None = None,
     source_agent: str | None = None,
     source_skill: str | None = None,
     source_ref: str | None = None,
     related_memory_ids: list[str] | None = None,
     confidence: float | None = None,
+    experiment_id: str | None = None,
+    paper_section: str | None = None,
+    metrics_summary: str | None = None,
+    parent_experiment: str | None = None,
+    artifact_paths: list[str] | None = None,
     vault_root: str | None = None,
 ) -> dict[str, Any]:
     try:
@@ -177,11 +218,17 @@ def memory_add(
             title=title,
             content=content,
             tags=tags,
+            source_type=source_type,
             source_agent=source_agent,
             source_skill=source_skill,
             source_ref=source_ref,
             related_memory_ids=related_memory_ids,
             confidence=confidence,
+            experiment_id=experiment_id,
+            paper_section=paper_section,
+            metrics_summary=metrics_summary,
+            parent_experiment=parent_experiment,
+            artifact_paths=artifact_paths,
         )
         return {
             "status": "success",
@@ -189,6 +236,9 @@ def memory_add(
             "project_id": mem.project_id,
             "type": mem.type.value,
             "title": mem.title,
+            "source_type": mem.source_type,
+            "experiment_id": mem.experiment_id,
+            "paper_section": mem.paper_section,
             "file_path": mem.file_path,
             "created_at": mem.created_at.isoformat(),
         }
@@ -212,6 +262,7 @@ def memory_get(project_id: str, memory_id: str, vault_root: str | None = None) -
             "status_field": mem.status.value,
             "created_at": mem.created_at.isoformat(),
             "updated_at": mem.updated_at.isoformat(),
+            "source_type": mem.source_type,
             "source_agent": mem.frontmatter.source_agent,
             "source_skill": mem.frontmatter.source_skill,
             "source_ref": mem.frontmatter.source_ref,
@@ -219,6 +270,12 @@ def memory_get(project_id: str, memory_id: str, vault_root: str | None = None) -
             "tags": mem.tags,
             "related": mem.related,
             "supersedes": mem.supersedes,
+            "superseded_by": mem.superseded_by,
+            "experiment_id": mem.experiment_id,
+            "paper_section": mem.paper_section,
+            "metrics_summary": mem.metrics_summary,
+            "parent_experiment": mem.parent_experiment,
+            "artifact_paths": mem.artifact_paths,
             "file_path": mem.file_path,
             "content": mem.content,
         }
@@ -228,25 +285,40 @@ def memory_get(project_id: str, memory_id: str, vault_root: str | None = None) -
         return {"status": "error", "message": str(exc)}
 
 
-@mcp.tool(description="Searches memories within a project (or across projects if cross_project=True) with keyword, tag, and type filters.")
+@mcp.tool(description="Searches memories within a project (or across projects if cross_project=True) with BM25 ranking, Chinese/English tokenization, and multi-field filters.")
 def memory_search(
     project_id: str,
     query: str | None = None,
     type: str | None = None,
     tags: list[str] | None = None,
+    tag_mode: str = "OR",
     status: str | None = None,
+    source_agent: str | None = None,
+    source_skill: str | None = None,
+    source_type: str | None = None,
+    min_confidence: float | None = None,
+    time_start: str | None = None,
+    time_end: str | None = None,
     limit: int = 20,
     cross_project: bool = False,
     vault_root: str | None = None,
 ) -> dict[str, Any]:
     try:
         r_svc = get_core_services(vault_root)[2]
+        mode_val = "AND" if tag_mode.upper() == "AND" else "OR"
         hits = r_svc.search_memories(
             project_id=project_id,
             query=query,
             type=type,
             tags=tags,
+            tag_mode=mode_val,
             status=status,
+            source_agent=source_agent,
+            source_skill=source_skill,
+            source_type=source_type,
+            min_confidence=min_confidence,
+            time_start=time_start,
+            time_end=time_end,
             limit=limit,
             cross_project=cross_project,
         )
@@ -255,6 +327,38 @@ def memory_search(
             "project_id": project_id,
             "total_hits": len(hits),
             "hits": [hit.model_dump() for hit in hits],
+        }
+    except ResearchOSError as exc:
+        return {"status": "error", "message": exc.message, "details": exc.details}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@mcp.tool(description="Traverses the relation graph (related, supersedes, superseded_by) starting from a memory within project boundary.")
+def memory_get_related(
+    project_id: str,
+    memory_id: str,
+    max_depth: int = 1,
+    direction: str = "both",
+    vault_root: str | None = None,
+) -> dict[str, Any]:
+    try:
+        r_svc = get_core_services(vault_root)[2]
+        dir_val = direction.lower().strip()
+        if dir_val not in ("outbound", "inbound", "both"):
+            dir_val = "both"
+        hits = r_svc.search_related_graph(
+            project_id=project_id,
+            memory_id=memory_id,
+            max_depth=max_depth,
+            direction=dir_val,
+        )
+        return {
+            "status": "success",
+            "project_id": project_id,
+            "source_memory_id": memory_id,
+            "total_related": len(hits),
+            "related_memories": [h.model_dump() for h in hits],
         }
     except ResearchOSError as exc:
         return {"status": "error", "message": exc.message, "details": exc.details}
@@ -271,7 +375,10 @@ def memory_update(
     tags: list[str] | None = None,
     confidence: float | None = None,
     status: str | None = None,
+    source_type: str | None = None,
+    source_ref: str | None = None,
     related_memory_ids: list[str] | None = None,
+    revision_note: str | None = None,
     vault_root: str | None = None,
 ) -> dict[str, Any]:
     try:
@@ -284,7 +391,10 @@ def memory_update(
             tags=tags,
             confidence=confidence,
             status=status,
+            source_type=source_type,
+            source_ref=source_ref,
             related_memory_ids=related_memory_ids,
+            revision_note=revision_note,
         )
         return {
             "status": "success",
@@ -308,6 +418,7 @@ def memory_supersede(
     reason: str,
     type: str | None = None,
     tags: list[str] | None = None,
+    source_type: str | None = None,
     source_agent: str | None = None,
     source_skill: str | None = None,
     source_ref: str | None = None,
@@ -325,6 +436,7 @@ def memory_supersede(
             reason=reason,
             type=type,
             tags=tags,
+            source_type=source_type,
             source_agent=source_agent,
             source_skill=source_skill,
             source_ref=source_ref,
@@ -376,15 +488,17 @@ def context_build(
     task: str | None = None,
     context_mode: str = "quick",
     max_tokens: int = 4000,
+    include_history: bool = False,
     vault_root: str | None = None,
 ) -> dict[str, Any]:
     try:
         c_bld = get_core_services(vault_root)[3]
-        pack = c_bld.build_context(
+        pack, meta = c_bld.build_context_pack(
             project_id=project_id,
             task=task,
             context_mode=context_mode,
             max_tokens=max_tokens,
+            include_history=include_history,
         )
         return {
             "status": "success",
@@ -392,6 +506,7 @@ def context_build(
             "context_mode": context_mode,
             "task": task,
             "context_pack": pack,
+            "metadata": meta.model_dump(),
         }
     except ResearchOSError as exc:
         return {"status": "error", "message": exc.message, "details": exc.details}
@@ -480,11 +595,147 @@ def index_rebuild(project_id: str, vault_root: str | None = None) -> dict[str, A
 
 
 @mcp.tool(description="Validates schemas of all memories, verifies links, and checks project folder integrity.")
-def project_validate(project_id: str, vault_root: str | None = None) -> dict[str, Any]:
+def project_validate(
+    project_id: str,
+    strict: bool = True,
+    vault_root: str | None = None,
+) -> dict[str, Any]:
     try:
         p_svc = get_core_services(vault_root)[0]
-        res = p_svc.validate_project(project_id)
+        res = p_svc.validate_project(project_id, strict=strict)
         return res
+    except ResearchOSError as exc:
+        return {"status": "error", "message": exc.message, "details": exc.details}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+# =========================================================================
+# 6. Always-on Project Memory Tools (MEMORY.md)
+# =========================================================================
+
+@mcp.tool(description="Retrieves the compressed Always-on Project Memory (MEMORY.md) for quick orientation.")
+def project_memory_get(project_id: str, vault_root: str | None = None) -> dict[str, Any]:
+    try:
+        root = Settings.discover_vault_root(vault_root)
+        pm_svc = ProjectMemoryService(root)
+        content = pm_svc.get_project_memory(project_id)
+        return {
+            "status": "success",
+            "project_id": project_id,
+            "memory_content": content,
+        }
+    except ResearchOSError as exc:
+        return {"status": "error", "message": exc.message, "details": exc.details}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@mcp.tool(description="Updates the Always-on Project Memory (MEMORY.md) with concurrency protection.")
+def project_memory_update(
+    project_id: str,
+    content: str,
+    reason: str | None = None,
+    vault_root: str | None = None,
+) -> dict[str, Any]:
+    try:
+        root = Settings.discover_vault_root(vault_root)
+        pm_svc = ProjectMemoryService(root)
+        updated_content = pm_svc.update_project_memory(project_id, content=content, reason=reason)
+        return {
+            "status": "success",
+            "project_id": project_id,
+            "updated_content": updated_content,
+        }
+    except ResearchOSError as exc:
+        return {"status": "error", "message": exc.message, "details": exc.details}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@mcp.tool(description="Validates MEMORY.md against the 10 canonical sections, cited memory IDs, and token budget.")
+def project_memory_validate(project_id: str, vault_root: str | None = None) -> dict[str, Any]:
+    try:
+        root = Settings.discover_vault_root(vault_root)
+        pm_svc = ProjectMemoryService(root)
+        res = pm_svc.validate_project_memory(project_id)
+        return res
+    except ResearchOSError as exc:
+        return {"status": "error", "message": exc.message, "details": exc.details}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@mcp.tool(description="Rebuilds MEMORY.md from scratch using PROJECT.md, STATE.md, and key active memories.")
+def project_memory_rebuild(
+    project_id: str,
+    max_tokens: int = 2000,
+    vault_root: str | None = None,
+) -> dict[str, Any]:
+    try:
+        root = Settings.discover_vault_root(vault_root)
+        pm_svc = ProjectMemoryService(root)
+        content = pm_svc.rebuild_project_memory(project_id, max_tokens=max_tokens)
+        return {
+            "status": "success",
+            "project_id": project_id,
+            "memory_content": content,
+        }
+    except ResearchOSError as exc:
+        return {"status": "error", "message": exc.message, "details": exc.details}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+# =========================================================================
+# 7. Paper Writing Mode Tools
+# =========================================================================
+
+@mcp.tool(description="Retrieves a lightweight metadata inventory of experiments for paper writing (Phase A/B).")
+def paper_evidence_inventory(
+    project_id: str,
+    paper_section: str | None = None,
+    status_filter: list[str] | None = None,
+    vault_root: str | None = None,
+) -> dict[str, Any]:
+    try:
+        root = Settings.discover_vault_root(vault_root)
+        ps = PaperService(root)
+        items = ps.get_paper_inventory(project_id, paper_section=paper_section, status_filter=status_filter)
+        return {
+            "status": "success",
+            "project_id": project_id,
+            "paper_section": paper_section,
+            "total_experiments": len(items),
+            "experiments": [item.model_dump() for item in items],
+        }
+    except ResearchOSError as exc:
+        return {"status": "error", "message": exc.message, "details": exc.details}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@mcp.tool(description="Checks Evidence Coverage for a paper section before drafting begins (Phase D).")
+def paper_evidence_coverage(
+    project_id: str,
+    paper_section: str,
+    loaded_memory_ids: list[str],
+    excluded_memory_ids: dict[str, str] | None = None,
+    vault_root: str | None = None,
+) -> dict[str, Any]:
+    try:
+        root = Settings.discover_vault_root(vault_root)
+        ps = PaperService(root)
+        cov = ps.check_evidence_coverage(
+            project_id=project_id,
+            paper_section=paper_section,
+            loaded_memory_ids=loaded_memory_ids,
+            excluded_memory_ids=excluded_memory_ids,
+        )
+        return {
+            "status": "success",
+            "coverage": cov.model_dump(),
+        }
     except ResearchOSError as exc:
         return {"status": "error", "message": exc.message, "details": exc.details}
     except Exception as exc:
@@ -497,13 +748,50 @@ def project_validate(project_id: str, vault_root: str | None = None) -> dict[str
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="ResearchOS Universal Memory MCP Server")
-    parser.add_argument("--transport", choices=["stdio", "sse"], default="stdio")
-    parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=7860)
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse"],
+        default=None,
+        help="Transport mode: stdio or sse (env: MCP_TRANSPORT, default: stdio)",
+    )
+    parser.add_argument(
+        "--host",
+        default=None,
+        help="Listening host (env: MCP_HOST or HOST, default: 0.0.0.0)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Listening port (env: PORT or MCP_PORT, default: 8000)",
+    )
+    parser.add_argument(
+        "--vault",
+        default=None,
+        help="Root path of the ResearchVault (env: RESEARCH_VAULT_ROOT or VAULT_PATH)",
+    )
     args = parser.parse_args()
 
-    if args.transport == "sse":
-        mcp.run(transport="sse", host=args.host, port=args.port)
+    # Precedence: CLI Argument > Environment Variable > Default
+    transport = Settings.get_mcp_transport(args.transport)
+    host = Settings.get_mcp_host(args.host)
+    port = Settings.get_mcp_port(args.port)
+    vault_root = Settings.discover_vault_root(args.vault)
+
+    import logging
+    log_level = getattr(logging, Settings.get_log_level(), logging.INFO)
+    logging.basicConfig(level=log_level, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    logger = logging.getLogger("researchos.mcp")
+    logger.info(
+        "Starting ResearchOS MCP Server: transport=%s, host=%s, port=%d, vault=%s",
+        transport,
+        host,
+        port,
+        vault_root,
+    )
+
+    if transport == "sse":
+        mcp.run(transport="sse", host=host, port=port)
     else:
         mcp.run(transport="stdio")
 

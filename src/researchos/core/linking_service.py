@@ -3,7 +3,7 @@
 import os
 import re
 from pathlib import Path, PurePosixPath
-from typing import Final
+from typing import Any, Final
 
 MD_LINK_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"\[(?P<text>[^\]]+)\]\((?P<target>[^\)]+)\)"
@@ -36,20 +36,38 @@ class LinkingService:
     @staticmethod
     def verify_internal_links(project_dir: Path | str, file_path: Path | str, content: str) -> list[str]:
         """Returns a list of broken internal links found in the content."""
+        detailed = LinkingService.verify_internal_links_detailed(project_dir, file_path, content)
+        return [d["message"] for d in detailed]
+
+    @staticmethod
+    def verify_internal_links_detailed(
+        project_dir: Path | str, file_path: Path | str, content: str
+    ) -> list[dict[str, Any]]:
+        """Returns structured details of broken internal links found in the content."""
+        p_dir = Path(project_dir).resolve()
         src_file = Path(file_path).resolve()
         src_dir = src_file.parent
-        broken = []
+        broken: list[dict[str, Any]] = []
 
-        for label, target in LinkingService.extract_markdown_links(content):
-            if target.startswith("http://") or target.startswith("https://") or target.startswith("mailto:"):
-                continue
-            # Strip anchors #
-            target_clean = target.split("#")[0]
-            if not target_clean:
-                continue
+        rel_src = src_file.relative_to(p_dir).as_posix() if src_file.is_relative_to(p_dir) else src_file.name
 
-            target_path = (src_dir / target_clean).resolve()
-            if not target_path.exists():
-                broken.append(f"[{label}]({target}) -> missing {target_path}")
+        for line_num, line in enumerate(content.splitlines(), start=1):
+            for label, target in LinkingService.extract_markdown_links(line):
+                if target.startswith("http://") or target.startswith("https://") or target.startswith("mailto:"):
+                    continue
+                target_clean = target.split("#")[0]
+                if not target_clean:
+                    continue
+
+                target_path = (src_dir / target_clean).resolve()
+                if not target_path.exists():
+                    broken.append({
+                        "source_file": rel_src,
+                        "line_number": line_num,
+                        "label": label,
+                        "target": target,
+                        "expected_path": target_path.as_posix(),
+                        "message": f"{rel_src}:{line_num} -> [{label}]({target}) missing target {target_clean}",
+                    })
 
         return broken

@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import date, datetime
@@ -89,15 +90,36 @@ def dump_frontmatter(metadata: dict[str, Any], body: str) -> str:
     return f"---\n{yaml_str}---\n"
 
 
+_local_locks = threading.local()
+
+
 @contextmanager
 def file_lock(lock_path: Path | str, timeout: float = 10.0) -> Generator[Path, None, None]:
-    """Acquires an exclusive file lock on the target lock_path with a timeout."""
+    """Acquires a re-entrant exclusive file lock with timeout and deadlock protection."""
     path = Path(lock_path).resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
+    key = str(path)
+
+    if not hasattr(_local_locks, "held"):
+        _local_locks.held = {}
+
+    if key in _local_locks.held:
+        _local_locks.held[key] += 1
+        try:
+            yield path
+        finally:
+            _local_locks.held[key] -= 1
+            if _local_locks.held[key] == 0:
+                del _local_locks.held[key]
+        return
 
     try:
-        with portalocker.Lock(str(path), mode="a+", timeout=timeout):
-            yield path
+        with portalocker.Lock(key, mode="a+", timeout=timeout):
+            _local_locks.held[key] = 1
+            try:
+                yield path
+            finally:
+                _local_locks.held.pop(key, None)
     except portalocker.exceptions.LockException as exc:
         raise LockAcquisitionError(
             f"Failed to acquire lock on {path} within {timeout}s: {exc}"

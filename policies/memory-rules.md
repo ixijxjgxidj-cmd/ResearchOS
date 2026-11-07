@@ -24,7 +24,8 @@ ResearchOS is NOT a chat log or temporary scratchpad:
 ## 3. Provenance and Traceability
 
 Every memory must specify:
+- Source type (`source_type`: `agent`, `human`, `experiment`, `imported`, `system`)
 - Originating agent (`source_agent`)
 - Calling skill (`source_skill`)
-- Provenance identifier (`source_ref`)
+- Provenance identifier (`source_ref`: strongly required for empirical findings, negatives, and decisions)
 - Related memories (`related`)

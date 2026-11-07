@@ -47,6 +47,11 @@
       "enum": ["active", "superseded", "archived"],
       "default": "active"
     },
+    "source_type": {
+      "type": ["string", "null"],
+      "enum": ["agent", "human", "experiment", "imported", "system", null],
+      "description": "Origin classification for provenance and credibility"
+    },
     "source_agent": {
       "type": ["string", "null"],
       "description": "Identifier of the agent that produced this memory"
@@ -79,6 +84,32 @@
     "supersedes": {
       "type": ["string", "null"],
       "description": "ID of previous memory superseded by this record"
+    },
+    "superseded_by": {
+      "type": ["string", "null"],
+      "description": "ID of newer memory that superseded this record"
+    },
+    "experiment_id": {
+      "type": ["string", "null"],
+      "description": "Optional experiment run or trial identifier"
+    },
+    "paper_section": {
+      "type": ["string", "null"],
+      "description": "Target section in paper outline"
+    },
+    "metrics_summary": {
+      "type": ["string", "null"],
+      "description": "Summary of quantitative metrics"
+    },
+    "parent_experiment": {
+      "type": ["string", "null"],
+      "description": "Memory ID or experiment ID of baseline/parent run"
+    },
+    "artifact_paths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "description": "Relative paths to raw artifacts or logs"
     }
   },
   "required": ["id", "project_id", "type", "title", "created_at", "updated_at", "status"],

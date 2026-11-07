@@ -13,6 +13,13 @@ services:
       - MCP_HOST=0.0.0.0
       - PORT=8000
       - RESEARCH_VAULT_ROOT=/data/vault
+      - LOG_LEVEL=INFO
     volumes:
       # Maps local directory to container vault for persistent Markdown storage
       - ./my_research_vault:/data/vault
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

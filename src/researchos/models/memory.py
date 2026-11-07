@@ -34,6 +34,16 @@ class MemoryStatus(str, Enum):
     ARCHIVED = "archived"
 
 
+class SourceType(str, Enum):
+    """Source classification for provenance and credibility."""
+
+    AGENT = "agent"
+    HUMAN = "human"
+    EXPERIMENT = "experiment"
+    IMPORTED = "imported"
+    SYSTEM = "system"
+
+
 class MemoryFrontmatter(BaseModel):
     """Standard YAML frontmatter for any universal memory markdown file."""
 
@@ -46,6 +56,10 @@ class MemoryFrontmatter(BaseModel):
     created_at: datetime = Field(default_factory=utc_now, description="ISO-8601 creation timestamp")
     updated_at: datetime = Field(default_factory=utc_now, description="ISO-8601 update timestamp")
     status: MemoryStatus = Field(default=MemoryStatus.ACTIVE, description="Lifecycle status")
+    source_type: SourceType | str | None = Field(
+        default=None,
+        description="Origin classification: agent, human, experiment, imported, system",
+    )
     source_agent: str | None = Field(default=None, description="Creating agent ID or name")
     source_skill: str | None = Field(default=None, description="Calling skill name")
     source_ref: str | None = Field(default=None, description="Source provenance (run, commit, DOI, link)")
@@ -60,6 +74,30 @@ class MemoryFrontmatter(BaseModel):
     supersedes: str | None = Field(
         default=None,
         description="ID of older memory that this record supersedes/replaces",
+    )
+    superseded_by: str | None = Field(
+        default=None,
+        description="ID of newer memory that superseded this record",
+    )
+    experiment_id: str | None = Field(
+        default=None,
+        description="Optional experiment run or trial identifier",
+    )
+    paper_section: str | None = Field(
+        default=None,
+        description="Target section in paper outline, e.g. '4.1 Main Results'",
+    )
+    metrics_summary: str | None = Field(
+        default=None,
+        description="Concise summary of quantitative metrics",
+    )
+    parent_experiment: str | None = Field(
+        default=None,
+        description="Memory ID or experiment ID of baseline/parent run",
+    )
+    artifact_paths: list[str] = Field(
+        default_factory=list,
+        description="Relative paths to raw artifacts or logs",
     )
 
     @field_validator("*", mode="before")
@@ -115,6 +153,35 @@ class Memory(BaseModel):
     def supersedes(self) -> str | None:
         return self.frontmatter.supersedes
 
+    @property
+    def superseded_by(self) -> str | None:
+        return self.frontmatter.superseded_by
+
+    @property
+    def source_type(self) -> str | None:
+        st = self.frontmatter.source_type
+        return st.value if isinstance(st, SourceType) else st
+
+    @property
+    def experiment_id(self) -> str | None:
+        return self.frontmatter.experiment_id
+
+    @property
+    def paper_section(self) -> str | None:
+        return self.frontmatter.paper_section
+
+    @property
+    def metrics_summary(self) -> str | None:
+        return self.frontmatter.metrics_summary
+
+    @property
+    def parent_experiment(self) -> str | None:
+        return self.frontmatter.parent_experiment
+
+    @property
+    def artifact_paths(self) -> list[str]:
+        return self.frontmatter.artifact_paths
+
 
 class ProjectFrontmatter(BaseModel):
     """YAML Frontmatter for PROJECT.md."""
@@ -158,3 +225,33 @@ class Project(BaseModel):
     @property
     def updated_at(self) -> datetime:
         return self.frontmatter.updated_at
+
+
+class PaperExperimentItem(BaseModel):
+    """Metadata item representing an experiment for Paper Writing Mode."""
+
+    memory_id: str
+    experiment_id: str | None = None
+    title: str
+    status: str
+    paper_section: str | None = None
+    metrics_summary: str | None = None
+    related_literature: list[str] = Field(default_factory=list)
+    parent_experiment: str | None = None
+    artifact_paths: list[str] = Field(default_factory=list)
+    created_at: str
+
+
+class EvidenceCoverage(BaseModel):
+    """Tracks evidence coverage progress for a specific paper section."""
+
+    project_id: str
+    paper_section: str
+    target_memory_ids: list[str] = Field(default_factory=list)
+    loaded_memory_ids: list[str] = Field(default_factory=list)
+    pending_memory_ids: list[str] = Field(default_factory=list)
+    excluded_memory_ids: dict[str, str] = Field(default_factory=dict)
+    is_fully_covered: bool = False
+    missing_evidence: list[str] = Field(default_factory=list)
+    missing_artifacts: list[str] = Field(default_factory=list)
+

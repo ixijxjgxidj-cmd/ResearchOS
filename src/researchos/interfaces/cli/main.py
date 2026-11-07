@@ -12,6 +12,8 @@ from researchos.config.settings import Settings
 from researchos.core.context_builder import ContextBuilder
 from researchos.core.handoff_service import HandoffService
 from researchos.core.memory_service import MemoryService
+from researchos.core.paper_service import PaperService
+from researchos.core.project_memory_service import ProjectMemoryService
 from researchos.core.project_service import ProjectService
 from researchos.core.retrieval_service import RetrievalService
 
@@ -23,14 +25,18 @@ console = Console()
 err_console = Console(stderr=True)
 
 project_app = typer.Typer(name="project", help="Manage independent project folders and status")
+project_memory_app = typer.Typer(name="memory", help="Always-on Project Memory (MEMORY.md) commands")
 memory_app = typer.Typer(name="memory", help="Create, search, update, supersede, and archive memories")
 context_app = typer.Typer(name="context", help="Build token-budgeted agent context packs")
 handoff_app = typer.Typer(name="handoff", help="Record and retrieve agent shift handoffs")
+paper_app = typer.Typer(name="paper", help="Paper Writing Mode: experiment inventory and evidence coverage")
 
+project_app.add_typer(project_memory_app)
 app.add_typer(project_app)
 app.add_typer(memory_app)
 app.add_typer(context_app)
 app.add_typer(handoff_app)
+app.add_typer(paper_app)
 
 
 def get_vault_path(vault: str | None) -> Path:
@@ -144,14 +150,106 @@ def project_rebuild_index_cmd(
 @project_app.command("validate")
 def project_validate_cmd(
     project_id: Annotated[str, typer.Argument(help="Project identifier")],
+    strict: Annotated[bool, typer.Option("--strict/--no-strict", help="Fail validation on broken links or invalid relations")] = True,
     vault: Annotated[str | None, typer.Option("--vault", "-v")] = None,
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    """Validates schemas and links across all project memories."""
+    """Validates schemas, links, relations, and folder integrity across all project memories."""
     v_path = get_vault_path(vault)
     svc = ProjectService(v_path)
-    res = svc.validate_project(project_id)
+    res = svc.validate_project(project_id, strict=strict)
+    if as_json:
+        output_data(res, as_json=True)
+    else:
+        status_color = "green" if res["valid"] else "red"
+        console.print(f"[{status_color}]Project Validation: {'PASSED' if res['valid'] else 'FAILED'}[/{status_color}]")
+        console.print(f"  Total Valid Memories: {res['total_memories']}")
+        console.print(f"  Checked Files:        {res['checked_files']}")
+        if res["errors"]:
+            console.print("[bold red]Errors:[/bold red]")
+            for err in res["errors"]:
+                console.print(f"  - {err}")
+        if res["broken_links"]:
+            console.print(f"[bold yellow]Broken Links ({len(res['broken_links'])}):[/bold yellow]")
+            for bl in res["broken_links"]:
+                console.print(f"  - {bl['message']}")
+        if res["invalid_relations"]:
+            console.print(f"[bold yellow]Invalid Relations ({len(res['invalid_relations'])}):[/bold yellow]")
+            for ir in res["invalid_relations"]:
+                console.print(f"  - {ir['message']}")
+        if res["orphan_memories"]:
+            console.print(f"[bold yellow]Orphan Memories ({len(res['orphan_memories'])}):[/bold yellow]")
+            for om in res["orphan_memories"]:
+                console.print(f"  - {om}")
+
+
+# =========================================================================
+# Project Memory (MEMORY.md) CLI Commands
+# =========================================================================
+
+@project_memory_app.command("get")
+def project_memory_get_cmd(
+    project_id: Annotated[str, typer.Argument(help="Project identifier")],
+    vault: Annotated[str | None, typer.Option("--vault", "-v")] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Reads the compressed Always-on Project Memory (MEMORY.md)."""
+    v_path = get_vault_path(vault)
+    pms = ProjectMemoryService(v_path)
+    content = pms.get_project_memory(project_id)
+    if as_json:
+        output_data({"project_id": project_id, "memory_content": content}, as_json=True)
+    else:
+        console.print(content)
+
+
+@project_memory_app.command("update")
+def project_memory_update_cmd(
+    project_id: Annotated[str, typer.Argument(help="Project identifier")],
+    content: Annotated[str, typer.Option("--content", "-c", help="New Markdown text for MEMORY.md")],
+    reason: Annotated[str | None, typer.Option("--reason", "-r", help="Update reason")] = None,
+    vault: Annotated[str | None, typer.Option("--vault", "-v")] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Atomically updates MEMORY.md."""
+    v_path = get_vault_path(vault)
+    pms = ProjectMemoryService(v_path)
+    updated = pms.update_project_memory(project_id, content=content, reason=reason)
+    if as_json:
+        output_data({"project_id": project_id, "status": "success", "content": updated}, as_json=True)
+    else:
+        console.print(f"[bold green]Updated MEMORY.md for project:[/bold green] `{project_id}`")
+
+
+@project_memory_app.command("validate")
+def project_memory_validate_cmd(
+    project_id: Annotated[str, typer.Argument(help="Project identifier")],
+    vault: Annotated[str | None, typer.Option("--vault", "-v")] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Validates MEMORY.md against the 10 canonical sections, cited IDs, and token budget."""
+    v_path = get_vault_path(vault)
+    pms = ProjectMemoryService(v_path)
+    res = pms.validate_project_memory(project_id)
     output_data(res, as_json=as_json)
+
+
+@project_memory_app.command("rebuild")
+def project_memory_rebuild_cmd(
+    project_id: Annotated[str, typer.Argument(help="Project identifier")],
+    tokens: Annotated[int, typer.Option("--tokens", "-t", help="Target token budget")] = 2000,
+    vault: Annotated[str | None, typer.Option("--vault", "-v")] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Reconstructs MEMORY.md from scratch using PROJECT.md, STATE.md, and key memories."""
+    v_path = get_vault_path(vault)
+    pms = ProjectMemoryService(v_path)
+    res = pms.rebuild_project_memory(project_id, max_tokens=tokens)
+    if as_json:
+        output_data({"project_id": project_id, "status": "success", "content": res}, as_json=True)
+    else:
+        console.print(f"[bold green]Rebuilt MEMORY.md for project:[/bold green] `{project_id}`")
+        console.print(res)
 
 
 # =========================================================================
@@ -165,10 +263,16 @@ def memory_add_cmd(
     title: Annotated[str, typer.Option("--title", "-t", help="Memory title")],
     content: Annotated[str, typer.Option("--content", "-c", help="Markdown content body")],
     tags: Annotated[list[str] | None, typer.Option("--tag", help="Tags")] = None,
+    source_type: Annotated[str | None, typer.Option("--source-type", help="Source type (agent, human, experiment, imported, system)")] = None,
     agent: Annotated[str | None, typer.Option("--agent", "-a", help="Source agent ID")] = None,
     skill: Annotated[str | None, typer.Option("--skill", "-s", help="Source skill")] = None,
     source_ref: Annotated[str | None, typer.Option("--ref", "-r", help="Source reference (URL, run, commit)")] = None,
     confidence: Annotated[float | None, typer.Option("--confidence", help="Confidence score (0.0 to 1.0)")] = None,
+    experiment_id: Annotated[str | None, typer.Option("--experiment-id", help="Experiment run identifier")] = None,
+    paper_section: Annotated[str | None, typer.Option("--section", help="Paper outline section, e.g. '4.1 Main Results'")] = None,
+    metrics_summary: Annotated[str | None, typer.Option("--metrics", help="Summary of quantitative metrics")] = None,
+    parent_experiment: Annotated[str | None, typer.Option("--parent", help="Parent experiment ID")] = None,
+    artifact_paths: Annotated[list[str] | None, typer.Option("--artifact", help="Artifact file path")] = None,
     vault: Annotated[str | None, typer.Option("--vault", "-v")] = None,
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
@@ -181,18 +285,25 @@ def memory_add_cmd(
         title=title,
         content=content,
         tags=tags,
+        source_type=source_type,
         source_agent=agent,
         source_skill=skill,
         source_ref=source_ref,
         confidence=confidence,
+        experiment_id=experiment_id,
+        paper_section=paper_section,
+        metrics_summary=metrics_summary,
+        parent_experiment=parent_experiment,
+        artifact_paths=artifact_paths,
     )
     if as_json:
         output_data(mem.model_dump(mode="json"), as_json=True)
     else:
         console.print(f"[bold green]Memory recorded:[/bold green] `{mem.id}`")
-        console.print(f"  [cyan]Title:[/cyan]     {mem.title}")
-        console.print(f"  [cyan]Type:[/cyan]      {mem.type.value}")
-        console.print(f"  [cyan]File:[/cyan]      {mem.file_path}")
+        console.print(f"  [cyan]Title:[/cyan]       {mem.title}")
+        console.print(f"  [cyan]Type:[/cyan]        {mem.type.value}")
+        console.print(f"  [cyan]Source Type:[/cyan] {mem.source_type}")
+        console.print(f"  [cyan]File:[/cyan]        {mem.file_path}")
 
 
 @memory_app.command("get")
@@ -221,13 +332,18 @@ def memory_search_cmd(
     query: Annotated[str | None, typer.Option("--query", "-q", help="Search query keywords")] = None,
     type: Annotated[str | None, typer.Option("--type", "-T", help="Filter by memory type")] = None,
     tags: Annotated[list[str] | None, typer.Option("--tag", "-t", help="Filter by tags")] = None,
+    tag_mode: Annotated[str, typer.Option("--tag-mode", help="Tag match mode (OR / AND)")] = "OR",
     status: Annotated[str | None, typer.Option("--status", "-s", help="Filter by status (active, superseded, archived)")] = None,
+    source_agent: Annotated[str | None, typer.Option("--agent", "-a", help="Filter by source agent")] = None,
+    source_skill: Annotated[str | None, typer.Option("--skill", help="Filter by source skill")] = None,
+    source_type: Annotated[str | None, typer.Option("--source-type", help="Filter by source type")] = None,
+    min_confidence: Annotated[float | None, typer.Option("--min-confidence", help="Minimum confidence threshold")] = None,
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max search hits")] = 20,
     cross_project: Annotated[bool, typer.Option("--cross-project", help="Search across all projects")] = False,
     vault: Annotated[str | None, typer.Option("--vault", "-v")] = None,
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    """Searches memories within a project (or across projects)."""
+    """Searches memories within a project with BM25 ranking and multi-field filters."""
     v_path = get_vault_path(vault)
     svc = RetrievalService(v_path)
     hits = svc.search_memories(
@@ -235,7 +351,12 @@ def memory_search_cmd(
         query=query,
         type=type,
         tags=tags,
+        tag_mode="AND" if tag_mode.upper() == "AND" else "OR",
         status=status,
+        source_agent=source_agent,
+        source_skill=source_skill,
+        source_type=source_type,
+        min_confidence=min_confidence,
         limit=limit,
         cross_project=cross_project,
     )
@@ -246,10 +367,43 @@ def memory_search_cmd(
         table.add_column("Memory ID", style="cyan")
         table.add_column("Type", style="magenta")
         table.add_column("Title", style="bold")
+        table.add_column("Score", style="green")
         table.add_column("Path", style="dim")
         table.add_column("Snippet")
         for h in hits:
-            table.add_row(h.memory_id, h.type, h.title, h.file_path, h.snippet)
+            table.add_row(h.memory_id, h.type, h.title, f"{h.score:.2f}", h.file_path, h.snippet)
+        console.print(table)
+
+
+@memory_app.command("related")
+def memory_related_cmd(
+    project_id: Annotated[str, typer.Argument(help="Project identifier")],
+    memory_id: Annotated[str, typer.Argument(help="Memory identifier")],
+    depth: Annotated[int, typer.Option("--depth", "-d", help="Max relation traversal depth (1-3)")] = 1,
+    direction: Annotated[str, typer.Option("--direction", help="Direction: outbound, inbound, both")] = "both",
+    vault: Annotated[str | None, typer.Option("--vault", "-v")] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Traverses the memory relation graph (related, supersedes, superseded_by)."""
+    v_path = get_vault_path(vault)
+    svc = RetrievalService(v_path)
+    hits = svc.search_related_graph(
+        project_id=project_id,
+        memory_id=memory_id,
+        max_depth=depth,
+        direction=direction if direction in ("outbound", "inbound", "both") else "both",
+    )
+    if as_json:
+        output_data([h.model_dump() for h in hits], as_json=True)
+    else:
+        table = Table(title=f"Related Memories for {memory_id} (Total: {len(hits)})")
+        table.add_column("Memory ID", style="cyan")
+        table.add_column("Relation", style="magenta")
+        table.add_column("Depth", style="yellow")
+        table.add_column("Direction", style="dim")
+        table.add_column("Title", style="bold")
+        for h in hits:
+            table.add_row(h.memory_id, h.relation_type, str(h.depth), h.direction, h.title)
         console.print(table)
 
 
@@ -333,18 +487,24 @@ def context_build_cmd(
     task: Annotated[str | None, typer.Option("--task", "-t", help="Specific task focus")] = None,
     mode: Annotated[str, typer.Option("--mode", "-m", help="Context mode: quick, task, full")] = "quick",
     max_tokens: Annotated[int, typer.Option("--max-tokens", "-b", help="Max tokens budget")] = 4000,
+    history: Annotated[bool, typer.Option("--history/--no-history", help="Include historical / superseded records in full mode")] = False,
     vault: Annotated[str | None, typer.Option("--vault", "-v")] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """Builds a prioritized, token-budgeted agent context pack."""
     v_path = get_vault_path(vault)
     builder = ContextBuilder(v_path)
-    pack = builder.build_context(
+    pack, meta = builder.build_context_pack(
         project_id=project_id,
         task=task,
         context_mode=mode,
         max_tokens=max_tokens,
+        include_history=history,
     )
-    console.print(pack)
+    if as_json:
+        output_data({"context_pack": pack, "metadata": meta.model_dump()}, as_json=True)
+    else:
+        console.print(pack)
 
 
 # =========================================================================
@@ -402,6 +562,78 @@ def handoff_get_cmd(
     svc = HandoffService(v_path)
     text = svc.get_latest_handoff(project_id)
     console.print(text)
+
+
+# =========================================================================
+# Paper Writing Mode CLI Commands
+# =========================================================================
+
+@paper_app.command("inventory")
+def paper_inventory_cmd(
+    project_id: Annotated[str, typer.Argument(help="Project identifier")],
+    section: Annotated[str | None, typer.Option("--section", "-s", help="Filter by paper section")] = None,
+    status: Annotated[list[str] | None, typer.Option("--status", help="Filter by status (completed, failed, interrupted, etc.)")] = None,
+    vault: Annotated[str | None, typer.Option("--vault", "-v")] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Retrieves lightweight experiment metadata for paper writing (Phase A/B)."""
+    v_path = get_vault_path(vault)
+    ps = PaperService(v_path)
+    items = ps.get_paper_inventory(project_id, paper_section=section, status_filter=status)
+    if as_json:
+        output_data([i.model_dump() for i in items], as_json=True)
+    else:
+        table = Table(title=f"Paper Experiment Inventory: {project_id} (Total: {len(items)})")
+        table.add_column("Memory ID", style="cyan")
+        table.add_column("Exp ID", style="magenta")
+        table.add_column("Status", style="yellow")
+        table.add_column("Section", style="dim")
+        table.add_column("Title", style="bold")
+        table.add_column("Metrics", style="green")
+        for it in items:
+            table.add_row(
+                it.memory_id,
+                it.experiment_id or "-",
+                it.status,
+                it.paper_section or "-",
+                it.title,
+                it.metrics_summary or "-",
+            )
+        console.print(table)
+
+
+@paper_app.command("coverage")
+def paper_coverage_cmd(
+    project_id: Annotated[str, typer.Argument(help="Project identifier")],
+    section: Annotated[str, typer.Option("--section", "-s", help="Paper section name")],
+    loaded: Annotated[list[str] | None, typer.Option("--loaded", "-l", help="Loaded memory ID")] = None,
+    vault: Annotated[str | None, typer.Option("--vault", "-v")] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Checks Evidence Coverage for a paper section (Phase D)."""
+    v_path = get_vault_path(vault)
+    ps = PaperService(v_path)
+    cov = ps.check_evidence_coverage(
+        project_id=project_id,
+        paper_section=section,
+        loaded_memory_ids=loaded or [],
+    )
+    if as_json:
+        output_data(cov.model_dump(), as_json=True)
+    else:
+        status_color = "green" if cov.is_fully_covered else "yellow"
+        console.print(f"[{status_color}]Evidence Coverage: {'COMPLETE' if cov.is_fully_covered else 'INCOMPLETE'}[/{status_color}]")
+        console.print(f"  Target Evidence Count: {len(cov.target_memory_ids)}")
+        console.print(f"  Loaded Evidence Count: {len(cov.loaded_memory_ids)}")
+        console.print(f"  Pending Evidence Count: {len(cov.pending_memory_ids)}")
+        if cov.pending_memory_ids:
+            console.print("[bold yellow]Pending Evidence (Must inspect before drafting):[/bold yellow]")
+            for pe in cov.missing_evidence:
+                console.print(f"  - {pe}")
+        if cov.missing_artifacts:
+            console.print("[bold red]Missing Artifact Files on Disk:[/bold red]")
+            for ma in cov.missing_artifacts:
+                console.print(f"  - {ma}")
 
 
 if __name__ == "__main__":

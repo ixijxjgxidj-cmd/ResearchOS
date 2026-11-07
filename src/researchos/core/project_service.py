@@ -154,6 +154,13 @@ class ProjectService:
             if not index_file.exists():
                 self._write_initial_index(pid, clean_name)
 
+            # 6. MEMORY.md (Always-on Project Memory initialization)
+            mem_file = p_dir / "MEMORY.md"
+            if not mem_file.exists():
+                from researchos.core.project_memory_service import ProjectMemoryService
+                pms = ProjectMemoryService(self.vault_root)
+                pms.rebuild_project_memory(pid)
+
         return self.get_project(pid)
 
     def _write_initial_index(self, project_id: str, project_name: str) -> None:
@@ -315,36 +322,142 @@ class ProjectService:
             "status": "success",
         }
 
-    def validate_project(self, project_id: str) -> dict[str, Any]:
-        """Validates all memory files, frontmatters, and links in the project."""
+    def validate_project(self, project_id: str, strict: bool = True) -> dict[str, Any]:
+        """Validates all memory files, frontmatters, links, relations, and folder integrity.
+
+        Args:
+            project_id: Unique project identifier.
+            strict: If True, broken links and invalid relation references cause valid=False.
+                    If False, broken links and invalid relations are treated as warnings.
+
+        Returns:
+            Dictionary containing validation results and detailed diagnostic lists:
+              - valid: bool
+              - errors: list[str] (parse/schema failures, duplicate IDs)
+              - warnings: list[str]
+              - broken_links: list[dict] (source file, line number, target, message)
+              - orphan_memories: list[str] (memories not indexed in INDEX.md)
+              - duplicate_ids: list[str] (conflicting memory IDs)
+              - invalid_relations: list[dict] (broken related/supersedes pointers)
+              - checked_files: int
+              - total_memories: int
+        """
         p_dir = self.get_project_dir(project_id)
         self.get_project(project_id)
 
-        valid_memories = 0
         errors: list[str] = []
-        broken_links: list[str] = []
+        warnings: list[str] = []
+        broken_links: list[dict[str, Any]] = []
+        invalid_relations: list[dict[str, Any]] = []
+        duplicate_ids_map: dict[str, list[str]] = {}
+        all_discovered_ids: dict[str, MemoryFrontmatter] = {}
+        valid_memories = 0
+        checked_files = 0
 
+        # Scan root control files
+        for root_file in ("PROJECT.md", "STATE.md", "INDEX.md", "HANDOFF.md", "MEMORY.md"):
+            rf = p_dir / root_file
+            if rf.exists():
+                checked_files += 1
+                try:
+                    rf_content = rf.read_text(encoding="utf-8")
+                    bl_list = LinkingService.verify_internal_links_detailed(p_dir, rf, rf_content)
+                    broken_links.extend(bl_list)
+                except Exception as exc:
+                    warnings.append(f"Failed to read root file {root_file}: {exc}")
+            else:
+                warnings.append(f"Missing recommended root file: {root_file}")
+
+        # Scan all memory subdirectories
         for sub in SUBDIRS:
             folder = p_dir / sub
             if not folder.exists():
                 continue
             for f in sorted(folder.glob("*.md")):
+                checked_files += 1
+                rel_f_path = f.relative_to(p_dir).as_posix()
                 try:
                     content = f.read_text(encoding="utf-8")
                     meta, body = parse_frontmatter(content)
-                    MemoryFrontmatter.model_validate(meta)
+                    fm = MemoryFrontmatter.model_validate(meta)
                     valid_memories += 1
-                    # check internal links
-                    links_broken = LinkingService.verify_internal_links(p_dir, f, body)
-                    for bl in links_broken:
-                        broken_links.append(f"{f.name}: {bl}")
+
+                    # Track duplicate IDs
+                    duplicate_ids_map.setdefault(fm.id, []).append(rel_f_path)
+                    all_discovered_ids[fm.id] = fm
+
+                    # Check internal markdown links
+                    bls = LinkingService.verify_internal_links_detailed(p_dir, f, body)
+                    broken_links.extend(bls)
+
                 except Exception as exc:
-                    errors.append(f"{f.relative_to(p_dir)}: {exc}")
+                    errors.append(f"{rel_f_path}: {exc}")
+
+        # Check duplicate IDs
+        duplicate_ids: list[str] = [
+            f"ID '{mid}' shared by: {', '.join(paths)}"
+            for mid, paths in duplicate_ids_map.items()
+            if len(paths) > 1
+        ]
+        if duplicate_ids:
+            errors.extend(duplicate_ids)
+
+        # Check relations (related, supersedes, superseded_by)
+        for mid, fm in all_discovered_ids.items():
+            for rel in fm.related:
+                if rel not in all_discovered_ids:
+                    invalid_relations.append({
+                        "source_id": mid,
+                        "relation_type": "related",
+                        "target_id": rel,
+                        "message": f"Memory '{mid}' references non-existent related memory '{rel}'",
+                    })
+            if fm.supersedes and fm.supersedes not in all_discovered_ids:
+                invalid_relations.append({
+                    "source_id": mid,
+                    "relation_type": "supersedes",
+                    "target_id": fm.supersedes,
+                    "message": f"Memory '{mid}' references non-existent supersedes target '{fm.supersedes}'",
+                })
+            if fm.superseded_by and fm.superseded_by not in all_discovered_ids:
+                invalid_relations.append({
+                    "source_id": mid,
+                    "relation_type": "superseded_by",
+                    "target_id": fm.superseded_by,
+                    "message": f"Memory '{mid}' references non-existent superseded_by target '{fm.superseded_by}'",
+                })
+
+        # Check orphan memories (memories missing from INDEX.md)
+        orphan_memories: list[str] = []
+        index_file = p_dir / "INDEX.md"
+        if index_file.exists():
+            index_text = index_file.read_text(encoding="utf-8")
+            for mid in all_discovered_ids:
+                if mid not in index_text:
+                    orphan_memories.append(mid)
+        if orphan_memories:
+            warnings.append(
+                f"{len(orphan_memories)} memories are not indexed in INDEX.md (run index_rebuild to fix)"
+            )
+
+        # Determine validity:
+        # Errors (schema/duplicate IDs) always invalidate.
+        # In strict mode, broken links or invalid relations also invalidate.
+        is_valid = len(errors) == 0
+        if strict:
+            if len(broken_links) > 0 or len(invalid_relations) > 0:
+                is_valid = False
 
         return {
             "project_id": project_id,
-            "valid": len(errors) == 0,
+            "valid": is_valid,
+            "strict": strict,
             "total_memories": valid_memories,
+            "checked_files": checked_files,
             "errors": errors,
+            "warnings": warnings,
             "broken_links": broken_links,
+            "orphan_memories": orphan_memories,
+            "duplicate_ids": duplicate_ids,
+            "invalid_relations": invalid_relations,
         }

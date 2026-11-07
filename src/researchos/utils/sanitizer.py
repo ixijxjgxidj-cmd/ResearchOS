@@ -3,13 +3,50 @@
 import re
 from typing import Any
 
-SENSITIVE_PATTERNS = [
+DEFAULT_SENSITIVE_PATTERNS = [
+    # Full multi-line private key blocks (RSA, OPENSSH, DSA, EC, PGP)
+    re.compile(
+        r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
+        re.MULTILINE,
+    ),
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----", re.MULTILINE),
-    re.compile(r'(?i)("?password"?\s*[:=]\s*")[^"]+(")'),
-    re.compile(r'(?i)("?api[_-]?key"?\s*[:=]\s*")[^"]+(")'),
-    re.compile(r'(?i)("?secret"?\s*[:=]\s*")[^"]+(")'),
-    re.compile(r'(?i)("?token"?\s*[:=]\s*")[^"]+(")'),
+    # OpenAI API keys
+    re.compile(r"\b(sk-[a-zA-Z0-9]{20,}|sk-proj-[a-zA-Z0-9_\-]{20,})\b"),
+    # Anthropic API keys
+    re.compile(r"\b(sk-ant-[a-zA-Z0-9_\-]{20,})\b"),
+    # Hugging Face tokens
+    re.compile(r"\b(hf_[a-zA-Z0-9]{20,})\b"),
+    # GitHub personal access tokens
+    re.compile(r"\b(ghp_[a-zA-Z0-9]{20,}|github_pat_[a-zA-Z0-9_\-]{20,})\b"),
+    # AWS Access Key ID
+    re.compile(r"\b(AKIA[0-9A-Z]{16})\b"),
+    # Bearer tokens in headers
+    re.compile(r"(?i)\bBearer\s+[a-zA-Z0-9_\-\.]{20,}\b"),
+    # Key-value secret assignments: api_key, password, secret, token, access_token
+    # Both quoted and unquoted: password: 'xxx' or password = "xxx" or password: xxx
+    re.compile(
+        r'(?i)\b(api[_-]?key|secret|password|passwd|auth[_-]?token|access[_-]?token|private[_-]?key)\b\s*[:=]\s*["\']?([^"\'\s\r\n]{6,})["\']?'
+    ),
 ]
+
+_custom_sensitive_patterns: list[re.Pattern] = []
+
+
+def register_sensitive_pattern(pattern: re.Pattern | str) -> None:
+    """Registers an additional regex pattern for secret redaction."""
+    pat = re.compile(pattern) if isinstance(pattern, str) else pattern
+    if pat not in _custom_sensitive_patterns:
+        _custom_sensitive_patterns.append(pat)
+
+
+def clear_custom_sensitive_patterns() -> None:
+    """Clears dynamically registered patterns (useful for testing)."""
+    _custom_sensitive_patterns.clear()
+
+
+def get_all_sensitive_patterns() -> list[re.Pattern]:
+    """Returns combined list of default and custom sensitive patterns."""
+    return DEFAULT_SENSITIVE_PATTERNS + _custom_sensitive_patterns
 
 
 def is_credential_key(key: str) -> bool:
@@ -36,13 +73,32 @@ def is_credential_key(key: str) -> bool:
     return False
 
 
+def sanitize_markdown_text(text: str) -> str:
+    """Redacts sensitive credentials and secrets from raw markdown text."""
+    if not text:
+        return text
+
+    sanitized = text
+    # Apply all registered regex patterns
+    for pat in get_all_sensitive_patterns():
+        if pat.groups >= 2:
+            # Key-value assignment match (e.g. key: secret) -> replace secret part with [REDACTED_CREDENTIAL]
+            def _replace_kv(m: re.Match) -> str:
+                prefix = m.group(1)
+                # Keep the key label, redact the value
+                return f"{prefix}: [REDACTED_CREDENTIAL]"
+
+            sanitized = pat.sub(_replace_kv, sanitized)
+        else:
+            sanitized = pat.sub("[REDACTED_CREDENTIAL]", sanitized)
+
+    return sanitized
+
+
 def sanitize_sensitive_data(val: Any) -> Any:
     """Recursively redacts credential keys and sensitive strings."""
     if isinstance(val, str):
-        sanitized = val
-        for pat in SENSITIVE_PATTERNS:
-            sanitized = pat.sub("[REDACTED_CREDENTIAL]", sanitized)
-        return sanitized
+        return sanitize_markdown_text(val)
     elif isinstance(val, dict):
         new_dict = {}
         for k, v in val.items():
