@@ -223,7 +223,8 @@ class RetrievalService:
 
                         if type_filter and fm.type.value != type_filter:
                             continue
-                        if status_filter and fm.status.value != status_filter:
+                        fm_stat = fm.status.value if hasattr(fm.status, "value") else str(fm.status)
+                        if status_filter and fm_stat != status_filter:
                             continue
                         if dt_start and fm.created_at < dt_start:
                             continue

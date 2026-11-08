@@ -36,6 +36,7 @@ TYPE_TO_DIR = {
 }
 
 SUBDIRS = [
+    "records",
     "knowledge",
     "decisions",
     "hypotheses",
@@ -295,8 +296,9 @@ class ProjectService:
                     tag_str = ", ".join(fm.tags) if fm.tags else "-"
                     src = fm.source_ref or fm.source_agent or "-"
                     sup = fm.supersedes or "-"
+                    stat_str = fm.status.value if hasattr(fm.status, "value") else str(fm.status)
                     lines.append(
-                        f"| `{fm.id}` | {title_link} | `{fm.status.value}` | {tag_str} | {src} | {sup} |"
+                        f"| `{fm.id}` | {title_link} | `{stat_str}` | {tag_str} | {src} | {sup} |"
                     )
                 lines.append("")
 

@@ -30,6 +30,7 @@ memory_app = typer.Typer(name="memory", help="Create, search, update, supersede,
 context_app = typer.Typer(name="context", help="Build token-budgeted agent context packs")
 handoff_app = typer.Typer(name="handoff", help="Record and retrieve agent shift handoffs")
 paper_app = typer.Typer(name="paper", help="Paper Writing Mode: experiment inventory and evidence coverage")
+hook_app = typer.Typer(name="hook", help="Memory Hook Core: context compaction recovery and session orientation")
 
 project_app.add_typer(project_memory_app)
 app.add_typer(project_app)
@@ -37,6 +38,7 @@ app.add_typer(memory_app)
 app.add_typer(context_app)
 app.add_typer(handoff_app)
 app.add_typer(paper_app)
+app.add_typer(hook_app)
 
 
 def get_vault_path(vault: str | None) -> Path:
@@ -276,6 +278,8 @@ def memory_add_cmd(
     metrics_summary: Annotated[str | None, typer.Option("--metrics", help="Summary of quantitative metrics")] = None,
     parent_experiment: Annotated[str | None, typer.Option("--parent", help="Parent experiment ID")] = None,
     artifact_paths: Annotated[list[str] | None, typer.Option("--artifact", help="Artifact file path")] = None,
+    standard_prefix: Annotated[bool, typer.Option("--standard-prefix", help="Use standard DEC-001/OBS-001 prefix ID")] = False,
+    slug: Annotated[bool, typer.Option("--slug", help="Append slugified title to filename")] = False,
     vault: Annotated[str | None, typer.Option("--vault", "-v")] = None,
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
@@ -298,6 +302,8 @@ def memory_add_cmd(
         metrics_summary=metrics_summary,
         parent_experiment=parent_experiment,
         artifact_paths=artifact_paths,
+        use_standard_prefix=standard_prefix,
+        use_slug=slug,
     )
     if as_json:
         output_data(mem.model_dump(mode="json"), as_json=True)
@@ -324,7 +330,8 @@ def memory_get_cmd(
         output_data(mem.model_dump(mode="json"), as_json=True)
     else:
         console.print(f"[bold green]Memory:[/bold green] {mem.id} - {mem.title} ({mem.type.value})")
-        console.print(f"[bold]Status:[/bold] {mem.status.value}")
+        stat_val = mem.status.value if hasattr(mem.status, "value") else str(mem.status)
+        console.print(f"[bold]Status:[/bold] {stat_val}")
         console.print(f"[bold]Tags:[/bold] {mem.tags}")
         console.print("\n" + mem.content)
 
@@ -488,9 +495,10 @@ def memory_archive_cmd(
 def context_build_cmd(
     project_id: Annotated[str, typer.Argument(help="Project identifier")],
     task: Annotated[str | None, typer.Option("--task", "-t", help="Specific task focus")] = None,
-    mode: Annotated[str, typer.Option("--mode", "-m", help="Context mode: quick, task, full")] = "quick",
+    mode: Annotated[str, typer.Option("--mode", "-m", help="Context mode: quick, task, paper, full")] = "quick",
     max_tokens: Annotated[int, typer.Option("--max-tokens", "-b", help="Max tokens budget")] = 4000,
     history: Annotated[bool, typer.Option("--history/--no-history", help="Include historical / superseded records in full mode")] = False,
+    section: Annotated[str | None, typer.Option("--section", "-s", help="Paper outline section for paper mode")] = None,
     vault: Annotated[str | None, typer.Option("--vault", "-v")] = None,
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
@@ -503,6 +511,7 @@ def context_build_cmd(
         context_mode=mode,
         max_tokens=max_tokens,
         include_history=history,
+        paper_section=section,
     )
     if as_json:
         output_data({"context_pack": pack, "metadata": meta.model_dump()}, as_json=True)
@@ -637,6 +646,125 @@ def paper_coverage_cmd(
             console.print("[bold red]Missing Artifact Files on Disk:[/bold red]")
             for ma in cov.missing_artifacts:
                 console.print(f"  - {ma}")
+
+
+# =========================================================================
+# Hook CLI Commands
+# =========================================================================
+
+@hook_app.command("run")
+def hook_run_cmd(
+    event: Annotated[str, typer.Option("--event", "-e", help="Lifecycle event: session_start, pre_compaction, post_compaction, session_end")],
+    project: Annotated[str | None, typer.Option("--project", "-p", help="Target project_id (auto-resolved if omitted)")] = None,
+    agent: Annotated[str | None, typer.Option("--agent", "-a", help="Agent identifier")] = None,
+    task: Annotated[str | None, typer.Option("--task", "-t", help="Current task focus")] = None,
+    work: Annotated[list[str] | None, typer.Option("--work", "-w", help="Completed work item")] = None,
+    next_steps: Annotated[list[str] | None, typer.Option("--next", "-n", help="Next action item")] = None,
+    blockers: Annotated[list[str] | None, typer.Option("--blocker", "-b", help="Current blocker item")] = None,
+    event_id: Annotated[str | None, typer.Option("--event-id", help="Explicit event identifier for idempotency")] = None,
+    vault: Annotated[str | None, typer.Option("--vault", "-v")] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Executes a Memory Hook Core lifecycle event."""
+    from researchos.hooks.adapters.generic_cli import GenericCLIAdapter
+    v_path = get_vault_path(vault)
+    adapter = GenericCLIAdapter(v_path)
+    ev = event.lower().strip()
+
+    if ev in ("session_start", "start"):
+        out = adapter.handle_session_start(project_id=project, agent_id=agent, event_id=event_id, as_json=as_json)
+    elif ev in ("pre_compaction", "pre-compact"):
+        out = adapter.handle_pre_compaction(
+            project_id=project,
+            agent_id=agent,
+            task=task,
+            completed_work=work,
+            next_steps=next_steps,
+            blockers=blockers,
+            event_id=event_id,
+            as_json=as_json,
+        )
+    elif ev in ("post_compaction", "post-compact", "compact"):
+        out = adapter.handle_post_compaction(project_id=project, agent_id=agent, event_id=event_id, as_json=as_json)
+    elif ev in ("session_end", "end"):
+        out = adapter.handle_session_end(
+            project_id=project,
+            agent_id=agent,
+            task=task,
+            completed_work=work,
+            next_steps=next_steps,
+            event_id=event_id,
+            as_json=as_json,
+        )
+    else:
+        err_console.print(f"[bold red]Unknown event:[/bold red] {event}")
+        raise typer.Exit(1)
+
+    console.print(out)
+
+
+@hook_app.command("session-start")
+def hook_session_start_cmd(
+    project: Annotated[str | None, typer.Option("--project", "-p")] = None,
+    agent: Annotated[str | None, typer.Option("--agent", "-a")] = None,
+    vault: Annotated[str | None, typer.Option("--vault", "-v")] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Dispatches Event A: Session Start hook."""
+    from researchos.hooks.adapters.generic_cli import GenericCLIAdapter
+    v_path = get_vault_path(vault)
+    adapter = GenericCLIAdapter(v_path)
+    console.print(adapter.handle_session_start(project_id=project, agent_id=agent, as_json=as_json))
+
+
+@hook_app.command("pre-compaction")
+def hook_pre_compaction_cmd(
+    project: Annotated[str | None, typer.Option("--project", "-p")] = None,
+    agent: Annotated[str | None, typer.Option("--agent", "-a")] = None,
+    task: Annotated[str | None, typer.Option("--task", "-t")] = None,
+    work: Annotated[list[str] | None, typer.Option("--work", "-w")] = None,
+    next_steps: Annotated[list[str] | None, typer.Option("--next", "-n")] = None,
+    vault: Annotated[str | None, typer.Option("--vault", "-v")] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Dispatches Event B: Before Compaction hook."""
+    from researchos.hooks.adapters.generic_cli import GenericCLIAdapter
+    v_path = get_vault_path(vault)
+    adapter = GenericCLIAdapter(v_path)
+    console.print(adapter.handle_pre_compaction(project_id=project, agent_id=agent, task=task, completed_work=work, next_steps=next_steps, as_json=as_json))
+
+
+@hook_app.command("post-compaction")
+def hook_post_compaction_cmd(
+    project: Annotated[str | None, typer.Option("--project", "-p")] = None,
+    agent: Annotated[str | None, typer.Option("--agent", "-a")] = None,
+    vault: Annotated[str | None, typer.Option("--vault", "-v")] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Dispatches Event C: After Compaction (CORE) hook."""
+    from researchos.hooks.adapters.generic_cli import GenericCLIAdapter
+    v_path = get_vault_path(vault)
+    adapter = GenericCLIAdapter(v_path)
+    console.print(adapter.handle_post_compaction(project_id=project, agent_id=agent, as_json=as_json))
+
+
+# =========================================================================
+# Migration CLI Command
+# =========================================================================
+
+@app.command("migrate")
+def migrate_cmd(
+    project: Annotated[str | None, typer.Option("--project", "-p", help="Target specific project_id")] = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Simulate migration without modifying files")] = False,
+    backup: Annotated[bool, typer.Option("--backup/--no-backup", help="Create backup before migration")] = True,
+    vault: Annotated[str | None, typer.Option("--vault", "-v")] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Losslessly migrates projects to the v3 Lightweight Scientific Memory architecture."""
+    from scripts.migrate_v2_to_v3 import run_migration_v2_to_v3
+    v_path = get_vault_path(vault)
+    res = run_migration_v2_to_v3(vault_root=v_path, target_project_id=project, dry_run=dry_run, backup=backup)
+    output_data(res, as_json=as_json)
 
 
 if __name__ == "__main__":

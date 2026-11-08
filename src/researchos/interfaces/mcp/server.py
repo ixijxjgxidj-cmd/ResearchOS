@@ -200,7 +200,7 @@ def memory_add(
     source_type: str | None = None,
     source_agent: str | None = None,
     source_skill: str | None = None,
-    source_ref: str | None = None,
+    source_ref: Any = None,
     related_memory_ids: list[str] | None = None,
     confidence: float | None = None,
     experiment_id: str | None = None,
@@ -208,6 +208,8 @@ def memory_add(
     metrics_summary: str | None = None,
     parent_experiment: str | None = None,
     artifact_paths: list[str] | None = None,
+    memory_id: str | None = None,
+    use_standard_prefix: bool = False,
     vault_root: str | None = None,
 ) -> dict[str, Any]:
     try:
@@ -229,6 +231,8 @@ def memory_add(
             metrics_summary=metrics_summary,
             parent_experiment=parent_experiment,
             artifact_paths=artifact_paths,
+            memory_id=memory_id,
+            use_standard_prefix=use_standard_prefix,
         )
         return {
             "status": "success",
@@ -259,7 +263,7 @@ def memory_get(project_id: str, memory_id: str, vault_root: str | None = None) -
             "project_id": mem.project_id,
             "type": mem.type.value,
             "title": mem.title,
-            "status_field": mem.status.value,
+            "status_field": mem.status.value if hasattr(mem.status, "value") else str(mem.status),
             "created_at": mem.created_at.isoformat(),
             "updated_at": mem.updated_at.isoformat(),
             "source_type": mem.source_type,
@@ -401,7 +405,7 @@ def memory_update(
             "memory_id": mem.id,
             "project_id": mem.project_id,
             "updated_at": mem.updated_at.isoformat(),
-            "status_field": mem.status.value,
+            "status_field": mem.status.value if hasattr(mem.status, "value") else str(mem.status),
         }
     except ResearchOSError as exc:
         return {"status": "error", "message": exc.message, "details": exc.details}
@@ -469,7 +473,7 @@ def memory_archive(
         return {
             "status": "success",
             "memory_id": archived.id,
-            "status_field": archived.status.value,
+            "status_field": archived.status.value if hasattr(archived.status, "value") else str(archived.status),
             "file_path": archived.file_path,
         }
     except ResearchOSError as exc:
@@ -482,13 +486,14 @@ def memory_archive(
 # 3. Context Builder Tool
 # =========================================================================
 
-@mcp.tool(description="Builds a prioritized, token-budgeted Markdown context pack (quick, task, or full) citing original file paths.")
+@mcp.tool(description="Builds a prioritized, token-budgeted Markdown context pack (quick, task, paper, or full) citing original file paths.")
 def context_build(
     project_id: str,
     task: str | None = None,
     context_mode: str = "quick",
     max_tokens: int = 4000,
     include_history: bool = False,
+    paper_section: str | None = None,
     vault_root: str | None = None,
 ) -> dict[str, Any]:
     try:
@@ -499,6 +504,7 @@ def context_build(
             context_mode=context_mode,
             max_tokens=max_tokens,
             include_history=include_history,
+            paper_section=paper_section,
         )
         return {
             "status": "success",
@@ -748,6 +754,45 @@ def paper_evidence_coverage(
 
 
 # =========================================================================
+# MCP Tool Exposure Profiles (Lite vs Advanced)
+# =========================================================================
+
+# The 6 core tools exposed under Lite profile
+LITE_TOOL_NAMES = {
+    "project_get",
+    "context_build",
+    "memory_add",
+    "memory_search",
+    "memory_get",
+    "handoff_create",
+}
+
+# Snapshot of all registered tools for dynamic profile switching
+_ALL_REGISTERED_TOOLS = dict(mcp._tool_manager._tools)
+
+
+def apply_mcp_profile(server: MCPServer, profile: str = "lite") -> None:
+    """Configures registered MCP tools according to the requested profile.
+
+    - 'lite': Exposes strictly the 6 core research tools (project_get, context_build,
+      memory_add, memory_search, memory_get, handoff_create).
+    - 'advanced': Exposes all 21+ tools including full maintenance and paper auditing.
+    """
+    p = profile.lower().strip()
+    if p == "advanced":
+        server._tool_manager._tools.clear()
+        server._tool_manager._tools.update(_ALL_REGISTERED_TOOLS)
+    else:
+        for name in list(server._tool_manager._tools.keys()):
+            if name not in LITE_TOOL_NAMES:
+                server._tool_manager.remove_tool(name)
+
+
+# Apply default profile (Lite by default)
+apply_mcp_profile(mcp, Settings.get_mcp_profile())
+
+
+# =========================================================================
 # Server execution entry point
 # =========================================================================
 
@@ -758,6 +803,12 @@ def main() -> None:
         choices=["stdio", "sse"],
         default=None,
         help="Transport mode: stdio or sse (env: MCP_TRANSPORT, default: stdio)",
+    )
+    parser.add_argument(
+        "--profile",
+        choices=["lite", "advanced"],
+        default=None,
+        help="MCP tool exposure profile: lite (6 core tools) or advanced (all tools) (env: RESEARCHOS_PROFILE, default: lite)",
     )
     parser.add_argument(
         "--host",
@@ -779,17 +830,23 @@ def main() -> None:
 
     # Precedence: CLI Argument > Environment Variable > Default
     transport = Settings.get_mcp_transport(args.transport)
+    profile = Settings.get_mcp_profile(args.profile)
     host = Settings.get_mcp_host(args.host)
     port = Settings.get_mcp_port(args.port)
     vault_root = Settings.discover_vault_root(args.vault)
+
+    # Configure active profile
+    apply_mcp_profile(mcp, profile)
 
     import logging
     log_level = getattr(logging, Settings.get_log_level(), logging.INFO)
     logging.basicConfig(level=log_level, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     logger = logging.getLogger("researchos.mcp")
     logger.info(
-        "Starting ResearchOS MCP Server: transport=%s, host=%s, port=%d, vault=%s",
+        "Starting ResearchOS MCP Server: transport=%s, profile=%s (%d tools), host=%s, port=%d, vault=%s",
         transport,
+        profile,
+        len(mcp._tool_manager._tools),
         host,
         port,
         vault_root,

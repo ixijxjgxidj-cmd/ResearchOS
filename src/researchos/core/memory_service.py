@@ -23,7 +23,7 @@ from researchos.utils.exceptions import (
     ProjectNotFoundError,
     ValidationError,
 )
-from researchos.utils.ids import MemoryIdGenerator
+from researchos.utils.ids import MemoryIdGenerator, sanitize_filename_slug
 from researchos.utils.sanitizer import sanitize_markdown_text
 
 DEFAULT_CONFIDENCE_MAP = {
@@ -48,14 +48,35 @@ class MemoryService:
         return self.project_svc.get_project_dir(project_id)
 
     def _find_memory_path(self, project_id: str, memory_id: str) -> Path | None:
-        """Locates the memory file inside any subdirectory of the project."""
+        """Locates the memory file inside any subdirectory (records/ or SUBDIRS) of the project."""
         p_dir = self._get_project_dir(project_id)
-        target_name = f"{memory_id}.md"
+        clean_id = memory_id.strip()
 
         for sub in SUBDIRS:
-            candidate = p_dir / sub / target_name
+            folder = p_dir / sub
+            if not folder.exists():
+                continue
+            # 1. Exact match <ID>.md
+            candidate = folder / f"{clean_id}.md"
             if candidate.exists() and candidate.is_file():
                 return candidate
+            # 2. Prefix match <ID>_*.md
+            matches = list(folder.glob(f"{clean_id}_*.md"))
+            if matches:
+                return matches[0]
+            # 3. Any file starting with <ID>
+            for f in folder.glob(f"{clean_id}*.md"):
+                if f.is_file():
+                    return f
+
+        # Also check project root
+        root_candidate = p_dir / f"{clean_id}.md"
+        if root_candidate.exists() and root_candidate.is_file():
+            return root_candidate
+        for f in p_dir.glob(f"{clean_id}_*.md"):
+            if f.is_file():
+                return f
+
         return None
 
     def add_memory(
@@ -68,7 +89,7 @@ class MemoryService:
         source_type: SourceType | str | None = None,
         source_agent: str | None = None,
         source_skill: str | None = None,
-        source_ref: str | None = None,
+        source_ref: list[str] | str | None = None,
         related_memory_ids: list[str] | None = None,
         confidence: float | None = None,
         supersedes: str | None = None,
@@ -78,6 +99,9 @@ class MemoryService:
         metrics_summary: str | None = None,
         parent_experiment: str | None = None,
         artifact_paths: list[str] | None = None,
+        memory_id: str | None = None,
+        use_standard_prefix: bool = False,
+        use_slug: bool = False,
     ) -> Memory:
         """Atomically adds a new memory with generated ID, frontmatter, and updates index."""
         if not title or not title.strip():
@@ -113,7 +137,7 @@ class MemoryService:
         else:
             if source_agent:
                 resolved_source_type = SourceType.AGENT
-            elif source_ref and ("run" in source_ref.lower() or "job" in source_ref.lower() or "exp" in source_ref.lower()):
+            elif source_ref and any(k in str(source_ref).lower() for k in ("run", "job", "exp")):
                 resolved_source_type = SourceType.EXPERIMENT
             else:
                 resolved_source_type = SourceType.AGENT
@@ -136,13 +160,24 @@ class MemoryService:
             resolved_confidence = DEFAULT_CONFIDENCE_MAP.get(mem_type, 0.80)
 
         # 1. Allocate unique monotonic memory ID under dedicated id_sequence.lock
-        id_gen = MemoryIdGenerator(p_dir)
-        mem_id = id_gen.next_memory_id()
+        if memory_id:
+            mem_id = memory_id.strip()
+        else:
+            id_gen = MemoryIdGenerator(p_dir)
+            if use_standard_prefix:
+                mem_id = id_gen.next_memory_id(type=mem_type)
+            else:
+                mem_id = id_gen.next_memory_id()
 
         target_dir_name = TYPE_TO_DIR.get(mem_type, "observations")
         target_dir = p_dir / target_dir_name
         target_dir.mkdir(parents=True, exist_ok=True)
-        target_file = target_dir / f"{mem_id}.md"
+
+        if use_slug:
+            slug = sanitize_filename_slug(title)
+            target_file = target_dir / f"{mem_id}_{slug}.md"
+        else:
+            target_file = target_dir / f"{mem_id}.md"
 
         if target_file.exists():
             raise EntityAlreadyExistsError(f"Memory file {target_file} already exists.")
@@ -189,7 +224,17 @@ class MemoryService:
         self.project_svc.rebuild_index(project_id)
         self.project_svc.touch_project(project_id)
 
-        rel_path = f"{target_dir_name}/{mem_id}.md"
+        # 4. Auto-refresh MEMORY.md if initialized
+        try:
+            from researchos.core.project_memory_service import ProjectMemoryService
+            pms = ProjectMemoryService(self.vault_root)
+            mem_file = p_dir / "MEMORY.md"
+            if mem_file.exists():
+                pms.rebuild_project_memory(project_id, preserve_custom_notes=True)
+        except Exception:
+            pass
+
+        rel_path = f"{target_dir_name}/{target_file.name}"
         return Memory(frontmatter=fm, content=body_to_write, file_path=rel_path)
 
     def get_memory(self, project_id: str, memory_id: str) -> Memory:
@@ -238,10 +283,11 @@ class MemoryService:
             fm = MemoryFrontmatter.model_validate(meta)
 
             # Prevent rewriting already superseded or archived records unless reactivating
-            if fm.status in (MemoryStatus.SUPERSEDED, MemoryStatus.ARCHIVED):
+            if fm.status in (MemoryStatus.SUPERSEDED, MemoryStatus.ARCHIVED, "superseded", "archived"):
                 if content is not None and content.strip() != body.strip():
+                    stat_val = fm.status.value if hasattr(fm.status, "value") else str(fm.status)
                     raise ValidationError(
-                        f"Cannot overwrite content of {fm.status.value} memory '{memory_id}'. "
+                        f"Cannot overwrite content of {stat_val} memory '{memory_id}'. "
                         f"Create a new memory or use supersede_memory instead."
                     )
 
@@ -279,6 +325,15 @@ class MemoryService:
 
         self.project_svc.rebuild_index(project_id)
         self.project_svc.touch_project(project_id)
+
+        try:
+            from researchos.core.project_memory_service import ProjectMemoryService
+            pms = ProjectMemoryService(self.vault_root)
+            mem_file = p_dir / "MEMORY.md"
+            if mem_file.exists():
+                pms.rebuild_project_memory(project_id, preserve_custom_notes=True)
+        except Exception:
+            pass
 
         rel_path = mem_path.relative_to(p_dir).as_posix()
         return Memory(frontmatter=fm, content=new_body, file_path=rel_path)
@@ -401,6 +456,15 @@ class MemoryService:
                 self.project_svc.rebuild_index(project_id)
                 self.project_svc.touch_project(project_id)
 
+                try:
+                    from researchos.core.project_memory_service import ProjectMemoryService
+                    pms = ProjectMemoryService(self.vault_root)
+                    mem_file = p_dir / "MEMORY.md"
+                    if mem_file.exists():
+                        pms.rebuild_project_memory(project_id, preserve_custom_notes=True)
+                except Exception:
+                    pass
+
                 rel_path = f"{target_dir_name}/{new_mem_id}.md"
                 return Memory(frontmatter=new_fm, content=body_to_write, file_path=rel_path)
 
@@ -447,6 +511,15 @@ class MemoryService:
 
         self.project_svc.rebuild_index(project_id)
         self.project_svc.touch_project(project_id)
+
+        try:
+            from researchos.core.project_memory_service import ProjectMemoryService
+            pms = ProjectMemoryService(self.vault_root)
+            mem_file = p_dir / "MEMORY.md"
+            if mem_file.exists():
+                pms.rebuild_project_memory(project_id, preserve_custom_notes=True)
+        except Exception:
+            pass
 
         fm = MemoryFrontmatter.model_validate(meta)
         return Memory(frontmatter=fm, content=body, file_path=f"archive/{dest_file.name}")

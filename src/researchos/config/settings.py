@@ -114,3 +114,17 @@ class Settings(BaseModel):
         if explicit:
             return explicit.upper().strip()
         return os.environ.get("LOG_LEVEL", "INFO").upper().strip()
+
+    @staticmethod
+    def get_mcp_profile(explicit: str | None = None) -> Literal["lite", "advanced"]:
+        """Resolves MCP tool exposure profile (lite=6 core tools, advanced=all tools).
+
+        Precedence: explicit > RESEARCHOS_PROFILE env var > 'lite'
+        """
+        if explicit:
+            val = explicit.lower().strip()
+            return "advanced" if val == "advanced" else "lite"
+        env = (os.environ.get("RESEARCHOS_PROFILE") or os.environ.get("MCP_PROFILE") or "").lower().strip()
+        if env == "advanced":
+            return "advanced"
+        return "lite"

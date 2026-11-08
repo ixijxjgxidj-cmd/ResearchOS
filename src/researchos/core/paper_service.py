@@ -42,9 +42,10 @@ class PaperService:
         inventory: list[PaperExperimentItem] = []
         status_filter_lower = [s.lower().strip() for s in status_filter] if status_filter else None
         target_section_lower = paper_section.lower().strip() if paper_section else None
+        seen_ids: set[str] = set()
 
-        # Scan observations, negative, and decisions
-        for sub in ("observations", "negative", "decisions", "archive"):
+        # Scan all memory storage directories
+        for sub in ("records", "observations", "hypotheses", "negative", "decisions", "knowledge", "archive"):
             sub_dir = p_dir / sub
             if not sub_dir.exists():
                 continue
@@ -57,8 +58,11 @@ class PaperService:
                         continue
 
                     fm = MemoryFrontmatter.model_validate(meta)
+                    if fm.id in seen_ids:
+                        continue
+                    seen_ids.add(fm.id)
 
-                    # Determine fine-grained status (Completed, Failed, Interrupted, Running, Superseded)
+                    # Determine fine-grained status (Completed, Failed, Interrupted, Running, Superseded, Hypothesis)
                     tags_lower = [t.lower() for t in fm.tags]
                     calc_status = "completed"
                     if fm.status == MemoryStatus.SUPERSEDED:
@@ -71,6 +75,8 @@ class PaperService:
                         calc_status = "interrupted"
                     elif "running" in tags_lower:
                         calc_status = "running"
+                    elif fm.type == MemoryType.HYPOTHESIS or fm.status == MemoryStatus.HYPOTHESIS:
+                        calc_status = "hypothesis"
 
                     # Status filter
                     if status_filter_lower and calc_status not in status_filter_lower:
@@ -87,12 +93,18 @@ class PaperService:
 
                     # Collect related literature
                     related_lit = [r for r in fm.related if r.startswith("REF-") or "ref" in r.lower()]
-                    if fm.source_ref and fm.source_ref.startswith(("10.", "http://", "https://", "arXiv")):
-                        related_lit.append(fm.source_ref)
+                    if fm.source_ref:
+                        ref_candidates = [fm.source_ref] if isinstance(fm.source_ref, str) else fm.source_ref
+                        for rc in ref_candidates:
+                            if isinstance(rc, str) and rc.startswith(("10.", "http://", "https://", "arXiv")):
+                                related_lit.append(rc)
+
+                    src_text = ", ".join(fm.source_ref) if isinstance(fm.source_ref, list) else (fm.source_ref or "")
+                    exp_id_val = fm.experiment_id or (src_text if "run" in src_text.lower() else None)
 
                     item = PaperExperimentItem(
                         memory_id=fm.id,
-                        experiment_id=fm.experiment_id or (fm.source_ref if fm.source_ref and "run" in fm.source_ref.lower() else None),
+                        experiment_id=exp_id_val,
                         title=fm.title,
                         status=calc_status,
                         paper_section=fm.paper_section,

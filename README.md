@@ -10,96 +10,171 @@ pinned: false
 
 # ResearchOS
 
-**A Universal Long-Term Memory Infrastructure for Autonomous Research Agents**
+**A Lightweight, Cross-Agent, Cross-Session Scientific Memory Architecture with Context Compaction Auto-Recovery**
 
-ResearchOS 是一个 **Agent-independent、Skill-independent、Project-isolated、Markdown-first** 的长期科研记忆系统。
+ResearchOS 是一个专为 AI 科研 Agent 设计的轻量级长期科研记忆系统。它具有 **Agent-independent、Filesystem-first、Project-isolated、Auto-Recovery** 的核心特征。
 
-它不是科研管理平台、实验执行引擎或 GPU 调度中心，而是所有科研 Agent（Claude Code, OpenAI Codex, Gemini CLI, Cursor, OpenCode 等）与专业 Skill 共享的通用长期科研记忆底座。
-
----
-
-## 1. 核心设计原则
-
-1. **One Project, One Folder**: 每个科研项目拥有完全独立的文件夹 (`ResearchVault/<project_id>/`)。
-2. **Project Isolation**: 不同项目默认完全隔离，杜绝跨项目记忆污染。
-3. **Markdown First**: 普通 Markdown 文件是唯一权威数据源。
-4. **Filesystem First**: 本地文件系统存储，不依赖任何关系型数据库或向量数据库。
-5. **Agent Independent**: 不绑定任何特定 Agent SDK 或私有 API。
-6. **Skill Independent**: 不承担实验规划、代码执行、GPU 管理等专业工作，只提供记忆存储与检索。
-7. **Obsidian Optional**: Obsidian 仅作为可选的本地浏览工具，绝不产生插件依赖或专有语法。
-8. **Portable**: 整个项目文件夹可直接复制、跨设备迁移、备份并立即生效。
-9. **Shared Memory**: 同一项目的所有 Agent 共享同一套记忆。
-10. **Human Readable**: 人类可以直接在任何文本编辑器中阅读和修改所有记忆。
+本次升级的核心目标：
+**让 Agent 在每次上下文压缩（Context Compaction）、会话重启（Session Reboot）或 Agent 切换后，都能自动恢复当前科研项目的关键记忆，而不需要重新阅读海量历史对话或实验文件。**
 
 ---
 
-## 2. 目录结构
+## 1. 核心设计原则 (Core Principles)
+
+1. **Memory First**: ResearchOS 专注于保存长期记忆、当前工作状态、核心决策、实验观察与失败经验。不承担 GPU 调度、代码运行、数据集下载或论文自动生成等具体工作流。
+2. **Filesystem First**: 本地 Markdown 文件是唯一权威载体，直接可读可编辑，不绑定特定厂商、私有数据库或 Obsidian 专有插件。
+3. **Project Isolation**: 每个项目拥有独立的物理目录 (`ResearchVault/<project_id>/`)，严禁跨项目记忆污染。
+4. **Deterministic Project Resolution (Zero Guessing)**: 通过优先级（显式参数 > 环境变量 > 向上目录树查找）精确匹配项目边界，坚决杜绝随意猜测。
+5. **Token Budget Awareness**: 核心恢复文件 `MEMORY.md` 严格控制在 400–800 tokens（硬上限 1,200 tokens）。
+6. **Multi-Agent Safe**: 细粒度文件锁与原子文件替换保证多 Agent 并发写入无竞争、无损坏。
+
+---
+
+## 2. 目录结构与权威职责
 
 ```text
 ResearchVault/
 └── my-research-project/
-    ├── PROJECT.md          # 项目元数据与核心目标
-    ├── STATE.md            # 当前研究状态、已知事实与进展
-    ├── MEMORY.md           # 常驻项目记忆摘要 (Always-on Project Memory, ~2,000 tokens)
-    ├── INDEX.md            # 自动生成的记忆分类索引与关联目录
-    ├── HANDOFF.md          # 最新一次 Agent 交接摘要
+    ├── PROJECT.md          # 权威文件：稳定的项目定义与研究约束
+    ├── STATE.md            # 权威文件：当前研究状态与下一步任务
+    ├── HANDOFF.md          # 权威文件：最新一次 Agent 交接摘要
+    ├── INDEX.md            # 索引目录：全部详细记忆的可重建索引
+    ├── MEMORY.md           # 自动生成的轻量上下文恢复快照 (~400-800 tokens)
     │
-    ├── knowledge/          # 知识与经验 (knowledge)
-    ├── decisions/          # 重要科研与架构决策及其原因 (decision)
-    ├── hypotheses/         # 假设及其验证状态 (hypothesis)
-    ├── observations/       # 实验观察、实测指标与发现 (observation)
-    ├── negative/           # 已验证无效的方案与死胡同 (negative)
-    ├── references/         # 外部论文 DOI、数据位置、代码引用 (reference)
-    ├── handoffs/           # 历史交接记录 (handoff)
-    └── archive/            # 归档记忆 (archive)
+    ├── records/            # 统一存储详细科研记录 (亦支持 legacy 分类子目录)
+    │   ├── DEC-0001_vit_patch16.md
+    │   ├── OBS-0001_snr_baseline.md
+    │   ├── NEG-0001_mask_ratio_collapse.md
+    │   ├── HYP-0001_fourier_attention.md
+    │   └── REF-0001_mae_paper.md
+    ├── handoffs/           # 历史交接备忘录
+    └── .researchos/        # 事务锁、版本控制与自动备份
 ```
 
 ---
 
-## 3. 通用记忆模型
+## 3. MEMORY.md — 核心上下文恢复快照
 
-统一使用标准 YAML Frontmatter + Markdown Body：
+`MEMORY.md` 是由底层权威文件自动合成的轻量上下文快照，统一包含 4 大标准章节：
 
-```yaml
+```markdown
 ---
-id: MEM-2026-0001
-project_id: deep-residual-scaling
-type: observation
-title: Optimal Depth-to-Width Ratio on 7B Frontier is 1:3.2
-created_at: 2026-11-08T00:00:00+08:00
-updated_at: 2026-11-08T00:00:00+08:00
-status: active
-source_type: experiment
-source_agent: codex
-source_skill: experiment-execution
-source_ref: RUN-042
-confidence: 0.94
-tags:
-  - scaling-laws
-  - frontier
-related:
-  - MEM-2026-0002
-supersedes: null
-superseded_by: null
-# 论文写作与实验元数据 (可选)
-experiment_id: EXP-DEPTH-WIDTH
-paper_section: experiments
-metrics_summary:
-  best_loss: 1.42
-  throughput: 3200
-parent_experiment: EXP-DEPTH-BASELINE
-artifact_paths:
-  - artifacts/run_042_loss.png
+schema_version: 1
+project_id: jepa-seismic
+generated_at: 2026-11-08T16:00:00+08:00
+memory_version: 12
 ---
 
-# Optimal Depth-to-Width Ratio on 7B Frontier is 1:3.2
+# MEMORY
 
-详细的实验结果、指标对比与推导过程...
+## 1. STABLE MEMORY
+
+### Project Identity
+- Project: Latent Masking Seismic
+- Research Goal: Unsupervised pretraining on seismic traces
+- Core Research Question: Can latent masking improve SNR?
+- Project Root: ResearchVault/jepa-seismic
+
+### Fixed Constraints
+- Max GPU Memory: 80GB (Single A100)
+- Sequence Length: 4096 tokens
+
+### Key Decisions
+- DEC-0001: Select ViT-Patch16 Architecture due to linear scaling
+
+## 2. WORKING MEMORY
+
+### Current Stage
+- Stage 2: Architecture Search & Baseline Evaluation
+
+### Current Task
+- Evaluating patch size 16 vs 32 on synthetic test set
+
+### Last Completed Work
+- Completed baseline data loader verification
+- Exported initial checkpoint weights
+
+### Next Actions
+1. Run ablation on patch size 16 vs 32
+2. Plot latent loss curves across 50 epochs
+
+### Current Blockers
+- Pending A100 GPU cluster availability
+
+### Open Questions
+- Does 2D Fourier phase embedding reduce spatial ringing?
+
+## 3. CRITICAL WARNINGS
+
+- [WARNING] NEG-0001: Mask ratio above 0.85 leads to latent representation collapse.
+
+## 4. MEMORY POINTERS
+
+- Project Definition: PROJECT.md
+- Detailed State: STATE.md
+- Latest Handoff: HANDOFF.md
+- Memory Index: INDEX.md
+- Detailed Records: records/
+- Key Observations: `OBS-0001`
+- Key Decisions: `DEC-0001`
+- Key Pitfalls: `NEG-0001`
 ```
 
 ---
 
-## 4. 快速开始
+## 4. Context Compaction Hook — 自动记忆恢复核心
+
+针对长上下文或多轮对话导致的主动/被动压缩（Context Compaction），ResearchOS 提供了独立于 Agent 平台的 Lifecycle Hook Core：
+
+```mermaid
+flowchart LR
+    A["Event A: Session Start"] --> B["Event B: Pre-Compaction\n(Save State & Handoff)"]
+    B --> C["Context Compaction\n(Host LLM Truncation)"]
+    C --> D["Event C: Post-Compaction\n(Inject Restored MEMORY.md)"]
+    D --> E["Agent Resumes with Full Context"]
+    E --> F["Event D: Session End\n(Create Handoff)"]
+```
+
+- **Event A (Session Start)**: 自动定位项目，校验 `MEMORY.md`，注入初始上下文。
+- **Event B (Pre-Compaction)**: 压缩前自动保存当前阶段、已完成工作和下一步任务至 `STATE.md` 与 `HANDOFF.md`。
+- **Event C (Post-Compaction — CORE)**: 压缩完成后立即触发，自动将最新 4-section `MEMORY.md` 注入 Agent 上下文（通过 Claude Code `additionalContext` 或 Antigravity 提示词注入），实现**无感记忆恢复**。
+- **Event D (Session End)**: 会话结束或交接时生成交接记录。
+
+详细配置指南请参考 [docs/hooks.md](docs/hooks.md) 与 [docs/hook_compatibility_matrix.md](docs/hook_compatibility_matrix.md)。
+
+---
+
+## 5. 三层渐进式检索 (Three-Level Retrieval)
+
+ResearchOS 提供灵活的三层检索机制，避免一次性向 Context 倾倒海量数据：
+
+1. **L0 (Quick 模式)**: 仅读取 `MEMORY.md` (~400–800 tokens)，用于快速恢复项目意识。
+2. **L1 (Task 模式)**: 读取 `MEMORY.md` + `PROJECT.md` + `STATE.md` + `HANDOFF.md` + BM25 检索的高度相关记忆记录。
+3. **L2 (Paper 模式)**: 提取结构化实验证据表（Run ID、指标摘要、完成/失败/中断状态），假设类记忆自动标注 `[Hypothesis - Unverified Claim]`。支持按 `paper_section` 过滤。
+4. **Full 模式**: 完整拉取所有活跃记忆与历史记录。
+
+---
+
+## 6. MCP Server 双 Profile 模式
+
+通过 `--profile` 参数或环境变量 `RESEARCHOS_PROFILE=lite|advanced` 切换：
+
+### Lite Profile (默认模式 — 极简 6 工具)
+保持 Agent 工具列表清爽，降低上下文认知负担：
+1. `project_get`: 读取项目元数据与最新状态。
+2. `context_build`: 构建指定模式 (`quick`, `task`, `paper`, `full`) 的上下文包。
+3. `memory_add`: 持久化科研记忆 (`DEC`, `OBS`, `NEG`, `HYP`, `REF`, `KNO`)。
+4. `memory_search`: 隔离检索当前项目的记忆记录。
+5. `memory_get`: 按需读取指定记忆的完整正文与细节。
+6. `handoff_create`: 会话收尾与交接。
+
+### Advanced Profile (全量 21+ 工具)
+用于管理员深度维护与复杂分析：
+`project_create`, `project_list`, `project_memory_get`, `project_memory_update`, `project_memory_validate`, `project_memory_rebuild`, `memory_get_related`, `memory_update`, `memory_supersede`, `memory_archive`, `handoff_get`, `index_rebuild`, `project_validate`, `paper_evidence_inventory`, `paper_evidence_coverage` 等。
+
+---
+
+## 7. 快速开始与命令行使用
 
 ### 安装
 
@@ -110,106 +185,52 @@ uv sync --extra dev
 ### CLI 命令
 
 ```bash
-# 1. 创建独立项目
-uv run researchos project create "Deep Residual Scaling" --id deep-scaling --goal "Optimize depth vs width"
+# 1. 触发 Context Compaction Hook
+uv run researchos hook session-start --project seismic-ssl
+uv run researchos hook post-compaction --project seismic-ssl
 
-# 2. 记录记忆
-uv run researchos memory add deep-scaling --type observation --title "Frontier optimal at 48L" --content "Details..." --tag scaling
+# 2. 构建指定层级的上下文
+uv run researchos context build seismic-ssl --mode quick
+uv run researchos context build seismic-ssl --mode task --task "evaluate ViT SNR"
+uv run researchos context build seismic-ssl --mode paper --section experiments
 
-# 3. 搜索记忆 (默认项目隔离)
-uv run researchos memory search deep-scaling --query "Frontier"
-
-# 4. 构建 Agent 上下文 (遵守 Token 预算，标注来源路径)
-uv run researchos context build deep-scaling --mode task --task "Optimize architecture" --max-tokens 4000
-
-# 5. 记录交接班 (自动同步 HANDOFF.md 与 STATE.md)
-uv run researchos handoff create deep-scaling --task "Grid ablation" --progress "Completed 12 runs" --agent codex
-
-# 6. 常驻项目记忆 (Always-on Project Memory)
-uv run researchos project memory get deep-scaling
-uv run researchos project memory validate deep-scaling
-
-# 7. 论文写作模式 (Paper Writing Mode)
-uv run researchos paper inventory deep-scaling --section methodology
-uv run researchos paper coverage deep-scaling --section methodology --loaded MEM-2026-0001
+# 3. 运行无损迁移脚本 (v2 -> v3)
+uv run researchos migrate --dry-run
+uv run researchos migrate
 ```
 
 ### 启动 MCP Server
 
 ```bash
+# 默认 Lite 模式 (6 工具)
 uv run researchos-mcp --transport stdio
-# 或 SSE 模式
+
+# Advanced 模式 (21+ 工具)
+RESEARCHOS_PROFILE=advanced uv run researchos-mcp --transport stdio
+
+# SSE 模式
 uv run researchos-mcp --transport sse --port 8000
 ```
 
-### Docker 容器部署与持久化
-
-```bash
-# 使用 docker-compose 启动带深层健康检查的 SSE MCP 服务
-docker compose up -d
-
-# 健康检查探测
-curl http://localhost:8000/health
-```
-
-### 核心环境变量
-
-| 变量名 | 兼容替代名称 | 默认值 | 作用说明 |
-| :--- | :--- | :--- | :--- |
-| `RESEARCH_VAULT_ROOT` | `VAULT_PATH` | `./ResearchVault` | 科研记忆存储根目录 |
-| `MCP_TRANSPORT` | - | `stdio` (容器默认 `sse`) | MCP 协议传输通道 (`stdio` 或 `sse`) |
-| `PORT` | `MCP_PORT` | `8000` | MCP SSE 服务监听端口 |
-| `MCP_HOST` | `HOST` | `0.0.0.0` | MCP 绑定监听地址 |
-| `LOG_LEVEL` | - | `INFO` | 日志详细级别 (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
-
 ---
 
-## 5. MCP 工具列表
+## 8. 无损迁移指南 (Migration)
 
-| 模块 | 工具名称 | 核心功能 |
-| :--- | :--- | :--- |
-| **Project** | `project_create` | 幂等创建独立科研项目文件夹与标准文档（自动初始化 `MEMORY.md`） |
-| | `project_list` | 列出当前 Vault 中的所有科研项目 |
-| | `project_get` | 获取项目元信息、最新状态及交接摘要 |
-| **Always-on Memory** | `project_memory_get` | 读取项目常驻记忆 `MEMORY.md` |
-| | `project_memory_update` | 原子安全更新 `MEMORY.md` 摘要内容 |
-| | `project_memory_validate` | 校验 10 大标准章节结构、记忆 ID 引用真实性与 Token 预算 |
-| | `project_memory_rebuild` | 灾难恢复：从底层详细记忆全量重建标准 `MEMORY.md` |
-| **Memory** | `memory_add` | 原子写入通用记忆（知识、决策、假设、观察、负面经验、引用，支持实验元数据） |
-| | `memory_get` | 根据记忆 ID 读取完整记忆文件（按需展开指标与细节） |
-| | `memory_search` | BM25 相关性排序、中英文 N-gram 分词与多维过滤（严格项目隔离） |
-| | `memory_get_related` | 关联记忆图谱遍历（related, supersedes, superseded_by，深度与防环控制） |
-| | `memory_update` | 原地安全更新记忆属性与正文（含敏感数据扫描与版本保护） |
-| | `memory_supersede` | 原子事务替换旧记忆，双向关联指针与异常自动回滚保护 |
-| | `memory_archive` | 归档记忆至 `archive/` 目录 |
-| **Paper Mode** | `paper_evidence_inventory` | 论文写作全局实验清单（元数据概览，细化完成/失败/中断/运行状态） |
-| | `paper_evidence_coverage` | 论文章节证据覆盖度审计（识别已加载、待查与缺失物理产物） |
-| **Context** | `context_build` | 按优先级与 Token 预算生成上下文包（Quick 模式默认置顶 `MEMORY.md`） |
-| **Handoff** | `handoff_create` | 记录 Agent 交接班，归档记录并同步更新 `HANDOFF.md` 与 `STATE.md` |
-| | `handoff_get` | 读取最新 `HANDOFF.md` 交接备忘录 |
-| **Maintenance** | `index_rebuild` | 磁盘扫描全量重建 `INDEX.md` 索引目录 |
-| | `project_validate` | 校验项目内所有记忆文件的 Schema、相对链接与跨文件关联健康度 |
-
----
-
-## 6. 从旧版 v1 迁移
-
-提供全自动化迁移脚本：
-- **默认 Dry-run**: 绝不擅自修改磁盘文件。
-- **自动备份**: 执行前自动创建快照备份。
-- **无损转换**: 将旧版 Experiments, Runs, Findings, Claims, Papers, Decisions, Artifacts 转换为 Universal Memory。
-- **绝不删除**: 保留原始历史文件。
+ResearchOS 提供全自动化无损迁移工具：
+- **安全备份**: 自动在 `.researchos/backups/pre_v3_migration_<timestamp>/` 存储完整快照。
+- **100% 记忆保留**: 自动保留全部历史记忆 ID 与关联，保留自定义注释块。
+- **自动回滚**: 迁移异常时自动原子回滚至备份状态。
 
 ```bash
 # 模拟运行
-uv run python scripts/migrate_v1_to_v2.py --vault .
+python scripts/migrate_v2_to_v3.py --dry-run
 
-# 实际执行
-uv run python scripts/migrate_v1_to_v2.py --vault . --apply
+# 执行迁移
+python scripts/migrate_v2_to_v3.py
 ```
 
 ---
 
-## 7. 许可证
+## 9. 许可证
 
 MIT License.

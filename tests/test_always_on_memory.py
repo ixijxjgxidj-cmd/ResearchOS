@@ -23,7 +23,8 @@ def test_1_each_project_independent_memory_md(tmp_path: Path):
 
     content = pms.get_project_memory("proj-alpha")
     assert "Always-on Project Memory: Project Alpha" in content
-    assert "## 1. Project Identity" in content
+    assert "Project Identity" in content
+    assert "STABLE MEMORY" in content
 
 
 def test_2_project_isolation_memory_md(tmp_path: Path):
@@ -370,5 +371,5 @@ def test_14_token_budget_management_retains_pointers(tmp_path: Path):
     rebuilt = pms.rebuild_project_memory("bl-proj", max_tokens=2000)
     tokens = estimate_tokens(rebuilt)
     assert tokens <= 2200
-    assert "## 8. Important Memory Pointers" in rebuilt
+    assert "MEMORY POINTERS" in rebuilt
     assert "MEM-" in rebuilt

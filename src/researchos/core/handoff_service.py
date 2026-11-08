@@ -136,6 +136,14 @@ class HandoffService:
             timestamp_str=now.strftime("%Y-%m-%d"),
         )
 
+        # 5. Refresh MEMORY.md snapshot
+        try:
+            from researchos.core.project_memory_service import ProjectMemoryService
+            pms = ProjectMemoryService(self.vault_root)
+            pms.rebuild_project_memory(project_id, preserve_custom_notes=True)
+        except Exception:
+            pass
+
         return mem
 
     def get_latest_handoff(self, project_id: str) -> str:

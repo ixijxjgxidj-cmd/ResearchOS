@@ -32,6 +32,12 @@ class MemoryStatus(str, Enum):
     ACTIVE = "active"
     SUPERSEDED = "superseded"
     ARCHIVED = "archived"
+    VERIFIED = "verified"
+    UNVERIFIED = "unverified"
+    PENDING = "pending"
+    HYPOTHESIS = "hypothesis"
+    FAILED = "failed"
+    INTERRUPTED = "interrupted"
 
 
 class SourceType(str, Enum):
@@ -49,20 +55,23 @@ class MemoryFrontmatter(BaseModel):
 
     model_config = ConfigDict(extra="ignore", validate_assignment=True)
 
-    id: str = Field(description="Unique Memory Identifier, e.g. MEM-2026-0001")
+    id: str = Field(description="Unique Memory Identifier, e.g. DEC-001 or MEM-2026-0001")
     project_id: str = Field(description="Parent Project Identifier")
     type: MemoryType = Field(description="Memory type classification")
     title: str = Field(description="Concise descriptive title of the memory")
     created_at: datetime = Field(default_factory=utc_now, description="ISO-8601 creation timestamp")
     updated_at: datetime = Field(default_factory=utc_now, description="ISO-8601 update timestamp")
-    status: MemoryStatus = Field(default=MemoryStatus.ACTIVE, description="Lifecycle status")
+    status: MemoryStatus | str = Field(default=MemoryStatus.ACTIVE, description="Lifecycle status")
     source_type: SourceType | str | None = Field(
         default=None,
         description="Origin classification: agent, human, experiment, imported, system",
     )
     source_agent: str | None = Field(default=None, description="Creating agent ID or name")
     source_skill: str | None = Field(default=None, description="Calling skill name")
-    source_ref: str | None = Field(default=None, description="Source provenance (run, commit, DOI, link)")
+    source_ref: list[str] | str | None = Field(
+        default=None,
+        description="Source provenance (run, commit, DOI, link, or list of experiment refs)",
+    )
     confidence: float | None = Field(
         default=None,
         ge=0.0,
@@ -254,4 +263,16 @@ class EvidenceCoverage(BaseModel):
     is_fully_covered: bool = False
     missing_evidence: list[str] = Field(default_factory=list)
     missing_artifacts: list[str] = Field(default_factory=list)
+
+
+class ProjectMemoryFrontmatter(BaseModel):
+    """Standard YAML frontmatter for Always-on Project Memory (MEMORY.md)."""
+
+    model_config = ConfigDict(extra="ignore", validate_assignment=True)
+
+    schema_version: int = Field(default=1, description="Schema version of MEMORY.md snapshot")
+    project_id: str = Field(description="Parent Project Identifier")
+    generated_at: datetime = Field(default_factory=utc_now, description="ISO-8601 generation timestamp")
+    memory_version: int = Field(default=1, description="Monotonically increasing memory snapshot version")
+
 
