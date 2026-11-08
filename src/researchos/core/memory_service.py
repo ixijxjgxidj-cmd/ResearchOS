@@ -135,57 +135,59 @@ class MemoryService:
         if resolved_confidence is None:
             resolved_confidence = DEFAULT_CONFIDENCE_MAP.get(mem_type, 0.80)
 
-        # Generate unique memory ID under lock to guarantee monotonicity
-        lock_path = p_dir / ".researchos" / "project.lock"
-        with file_lock(lock_path, timeout=10.0):
-            id_gen = MemoryIdGenerator(p_dir)
-            mem_id = id_gen.next_memory_id()
+        # 1. Allocate unique monotonic memory ID under dedicated id_sequence.lock
+        id_gen = MemoryIdGenerator(p_dir)
+        mem_id = id_gen.next_memory_id()
 
-            target_dir_name = TYPE_TO_DIR.get(mem_type, "observations")
-            target_dir = p_dir / target_dir_name
-            target_dir.mkdir(parents=True, exist_ok=True)
-            target_file = target_dir / f"{mem_id}.md"
+        target_dir_name = TYPE_TO_DIR.get(mem_type, "observations")
+        target_dir = p_dir / target_dir_name
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_file = target_dir / f"{mem_id}.md"
 
-            if target_file.exists():
-                raise EntityAlreadyExistsError(f"Memory file {target_file} already exists.")
+        if target_file.exists():
+            raise EntityAlreadyExistsError(f"Memory file {target_file} already exists.")
 
-            now = utc_now()
-            fm = MemoryFrontmatter(
-                id=mem_id,
-                project_id=project_id,
-                type=mem_type,
-                title=title.strip(),
-                created_at=now,
-                updated_at=now,
-                status=MemoryStatus.ACTIVE,
-                source_type=resolved_source_type,
-                source_agent=source_agent,
-                source_skill=source_skill,
-                source_ref=resolved_source_ref,
-                confidence=resolved_confidence,
-                tags=tags or [],
-                related=related_memory_ids or [],
-                supersedes=supersedes,
-                superseded_by=superseded_by,
-                experiment_id=experiment_id,
-                paper_section=paper_section,
-                metrics_summary=metrics_summary,
-                parent_experiment=parent_experiment,
-                artifact_paths=artifact_paths or [],
-            )
+        now = utc_now()
+        fm = MemoryFrontmatter(
+            id=mem_id,
+            project_id=project_id,
+            type=mem_type,
+            title=title.strip(),
+            created_at=now,
+            updated_at=now,
+            status=MemoryStatus.ACTIVE,
+            source_type=resolved_source_type,
+            source_agent=source_agent,
+            source_skill=source_skill,
+            source_ref=resolved_source_ref,
+            confidence=resolved_confidence,
+            tags=tags or [],
+            related=related_memory_ids or [],
+            supersedes=supersedes,
+            superseded_by=superseded_by,
+            experiment_id=experiment_id,
+            paper_section=paper_section,
+            metrics_summary=metrics_summary,
+            parent_experiment=parent_experiment,
+            artifact_paths=artifact_paths or [],
+        )
 
-            # Security: Sanitize markdown body to prevent secret / credential leaks
-            clean_content = sanitize_markdown_text(content.strip())
-            body_to_write = clean_content
-            if not clean_content.startswith("# "):
-                body_to_write = f"# {title.strip()}\n\n{clean_content}"
+        # Security: Sanitize markdown body to prevent secret / credential leaks
+        clean_content = sanitize_markdown_text(content.strip())
+        body_to_write = clean_content
+        if not clean_content.startswith("# "):
+            body_to_write = f"# {title.strip()}\n\n{clean_content}"
 
-            full_text = dump_frontmatter(fm.model_dump(mode="json"), body_to_write)
+        full_text = dump_frontmatter(fm.model_dump(mode="json"), body_to_write)
+
+        # 2. Fine-grained lock per memory file during atomic write
+        mem_lock = p_dir / ".researchos" / f"{mem_id}.lock"
+        with file_lock(mem_lock, timeout=10.0):
             atomic_write_text(target_file, full_text)
 
-            # Rebuild index and touch project
-            self.project_svc.rebuild_index(project_id)
-            self.project_svc.touch_project(project_id)
+        # 3. Rebuild index (uses dedicated index.lock) and touch project
+        self.project_svc.rebuild_index(project_id)
+        self.project_svc.touch_project(project_id)
 
         rel_path = f"{target_dir_name}/{mem_id}.md"
         return Memory(frontmatter=fm, content=body_to_write, file_path=rel_path)

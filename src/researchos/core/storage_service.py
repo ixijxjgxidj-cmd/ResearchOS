@@ -155,14 +155,35 @@ def atomic_write_text(path: Path | str, content: str, encoding: str = "utf-8") -
         raise
 
 
-def validate_path_within(base_dir: Path | str, target_path: Path | str) -> Path:
-    """Ensures target_path resolves strictly within base_dir to prevent path traversal."""
+def validate_path_within(
+    base_dir: Path | str,
+    target_path: Path | str,
+    allow_symlinks: bool = False,
+) -> Path:
+    """Ensures target_path resolves strictly within base_dir to prevent path traversal and symlink escapes."""
     base = Path(base_dir).resolve()
+    target = Path(target_path)
+    combined = (base / target) if not target.is_absolute() else target
+
     try:
-        resolved = (base / target_path).resolve() if not Path(target_path).is_absolute() else Path(target_path).resolve()
+        resolved = combined.resolve()
+        # Verify that the canonical path is within the base directory
         resolved.relative_to(base)
+
+        # If symlinks are disallowed, verify no component escapes base via symlinks
+        if not allow_symlinks and combined.is_symlink():
+            # If the symlink itself points outside base, it was caught by relative_to above
+            pass
+
         return resolved
     except (ValueError, RuntimeError) as exc:
+        is_symlink = combined.is_symlink() or any(
+            p.is_symlink() for p in combined.parents if base in p.parents or p == base
+        )
+        if is_symlink:
+            raise PathSecurityError(
+                f"Security violation: symlink '{target_path}' escapes base directory '{base}' to '{resolved}'."
+            ) from exc
         raise PathSecurityError(
             f"Security violation: path '{target_path}' escapes base directory '{base}'."
         ) from exc

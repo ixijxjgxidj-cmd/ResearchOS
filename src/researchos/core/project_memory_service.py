@@ -85,6 +85,12 @@ class ProjectMemoryService:
             clean_text = f"*Last Updated: {now}*\n\n{clean_text}"
 
         with file_lock(lock_path, timeout=10.0):
+            if mem_file.exists():
+                try:
+                    bak_file = mem_file.with_name("MEMORY.md.bak")
+                    atomic_write_text(bak_file, mem_file.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
             atomic_write_text(mem_file, clean_text)
             self.project_svc.touch_project(project_id)
 
@@ -196,14 +202,74 @@ class ProjectMemoryService:
             "within_budget": within_budget,
         }
 
+    @staticmethod
+    def _parse_existing_sections(content: str) -> dict[str, str]:
+        """Parses markdown content into section title -> section body."""
+        sections: dict[str, str] = {}
+        current_title: str | None = None
+        current_lines: list[str] = []
+
+        for line in content.splitlines():
+            m = re.match(r"^##\s*(?:\d+\.\s*)?([^\n#]+)", line)
+            if m:
+                if current_title:
+                    sections[current_title] = "\n".join(current_lines).strip()
+                current_title = m.group(1).strip()
+                current_lines = []
+            elif current_title is not None:
+                current_lines.append(line)
+
+        if current_title:
+            sections[current_title] = "\n".join(current_lines).strip()
+
+        return sections
+
+    @staticmethod
+    def _find_section_content(
+        sections: dict[str, str], canonical_name: str
+    ) -> str | None:
+        """Finds section content matching canonical name case-insensitively."""
+        c_norm = canonical_name.lower().strip()
+        for key, val in sections.items():
+            k_norm = key.lower().strip()
+            if c_norm in k_norm or k_norm in c_norm:
+                return val
+        return None
+
     def rebuild_project_memory(
         self,
         project_id: str,
         max_tokens: int = 2000,
+        preserve_custom_notes: bool = True,
     ) -> str:
-        """Deterministically synthesizes MEMORY.md from PROJECT.md, STATE.md, and key active memories."""
+        """Deterministically synthesizes MEMORY.md from PROJECT.md, STATE.md, and key active memories.
+
+        Creates backup (.bak and timestamped) and preserves custom non-placeholder human/agent notes
+        when preserve_custom_notes is True.
+        """
         p_dir = self.project_svc.get_project_dir(project_id)
         proj = self.project_svc.get_project(project_id)
+        mem_file = self.get_memory_file(project_id)
+
+        # 0. Backup existing MEMORY.md and extract custom notes if requested
+        existing_sections: dict[str, str] = {}
+        if mem_file.exists():
+            try:
+                old_content = mem_file.read_text(encoding="utf-8")
+                # Immediate backup
+                bak_file = mem_file.with_name("MEMORY.md.bak")
+                atomic_write_text(bak_file, old_content)
+
+                # Timestamped backup in .researchos/backups/
+                backups_dir = p_dir / ".researchos" / "backups"
+                backups_dir.mkdir(parents=True, exist_ok=True)
+                ts = utc_now().strftime("%Y%m%d_%H%M%S")
+                atomic_write_text(backups_dir / f"MEMORY_{ts}.md", old_content)
+
+                if preserve_custom_notes:
+                    existing_sections = self._parse_existing_sections(old_content)
+            except Exception:
+                existing_sections = {}
 
         # 1. Load active project memories
         all_memories = self._load_project_memories(project_id)
@@ -218,7 +284,34 @@ class ProjectMemoryService:
 
         now = utc_now().isoformat()
 
-        # Build sections according to specification
+        # Section 1. Project Identity
+        target_venue = "_Not yet established_"
+        sec1_custom_lines: list[str] = []
+        sec1_text = self._find_section_content(existing_sections, "Project Identity")
+        if sec1_text:
+            m_ven = re.search(
+                r"-\s*\*\*Target Publication Venue\*\*:\s*([^\n]+)",
+                sec1_text,
+                re.IGNORECASE,
+            )
+            if m_ven and "_Not yet established_" not in m_ven.group(1):
+                target_venue = m_ven.group(1).strip()
+            for line in sec1_text.splitlines():
+                sline = line.strip()
+                if not sline:
+                    continue
+                if any(
+                    sline.startswith(prefix)
+                    for prefix in [
+                        "- **Research Topic**:",
+                        "- **Core Goal**:",
+                        "- **Description**:",
+                        "- **Target Publication Venue**:",
+                    ]
+                ):
+                    continue
+                sec1_custom_lines.append(line)
+
         lines = [
             f"# Always-on Project Memory: {proj.project_name}",
             f"*Project ID: `{project_id}` | Last Updated: {now}*",
@@ -231,20 +324,58 @@ class ProjectMemoryService:
             f"- **Research Topic**: {proj.project_name}",
             f"- **Core Goal**: {proj.frontmatter.research_goal or 'Advance research objectives.'}",
             f"- **Description**: {proj.frontmatter.description or 'Active scientific investigation.'}",
-            "- **Target Publication Venue**: _Not yet established_",
-            "",
-            "## 2. Core Research Idea",
+            f"- **Target Publication Venue**: {target_venue}",
         ]
+        if sec1_custom_lines:
+            lines.extend(sec1_custom_lines)
+        lines.append("")
 
+        # Section 2. Core Research Idea
+        key_innovations = "_Not yet established_"
+        diff_prior_work = "_Not yet established_"
+        sec2_custom_lines: list[str] = []
+        sec2_text = self._find_section_content(existing_sections, "Core Research Idea")
+        if sec2_text:
+            m_inn = re.search(
+                r"-\s*\*\*Key Innovations\*\*:\s*([^\n]+)",
+                sec2_text,
+                re.IGNORECASE,
+            )
+            if m_inn and "_Not yet established_" not in m_inn.group(1):
+                key_innovations = m_inn.group(1).strip()
+            m_dif = re.search(
+                r"-\s*\*\*Difference from Prior Work\*\*:\s*([^\n]+)",
+                sec2_text,
+                re.IGNORECASE,
+            )
+            if m_dif and "_Not yet established_" not in m_dif.group(1):
+                diff_prior_work = m_dif.group(1).strip()
+            for line in sec2_text.splitlines():
+                sline = line.strip()
+                if (
+                    not sline
+                    or sline.startswith("- **Key Innovations**")
+                    or sline.startswith("- **Difference from Prior Work**")
+                ):
+                    continue
+                if (
+                    sline != "- _Not yet established_"
+                    and sline != f"- {proj.frontmatter.description}"
+                ):
+                    sec2_custom_lines.append(line)
+
+        lines.append("## 2. Core Research Idea")
         if proj.frontmatter.description:
             lines.append(f"- {proj.frontmatter.description}")
         else:
             lines.append("- _Not yet established_")
-        lines.append("- **Key Innovations**: _Not yet established_")
-        lines.append("- **Difference from Prior Work**: _Not yet established_")
+        lines.append(f"- **Key Innovations**: {key_innovations}")
+        lines.append(f"- **Difference from Prior Work**: {diff_prior_work}")
+        if sec2_custom_lines:
+            lines.extend(sec2_custom_lines)
         lines.append("")
 
-        # 3. Confirmed Findings
+        # Section 3. Confirmed Findings
         lines.append("## 3. Confirmed Findings")
         if observations:
             for obs in observations[-5:]:
@@ -253,7 +384,7 @@ class ProjectMemoryService:
             lines.append("- _No confirmed empirical findings recorded yet._")
         lines.append("")
 
-        # 4. Current Hypotheses
+        # Section 4. Current Hypotheses
         lines.append("## 4. Current Hypotheses")
         if hypotheses:
             for hyp in hypotheses[-5:]:
@@ -262,7 +393,7 @@ class ProjectMemoryService:
             lines.append("- _No active hypotheses recorded yet._")
         lines.append("")
 
-        # 5. Important Decisions
+        # Section 5. Important Decisions
         lines.append("## 5. Important Decisions")
         if decisions:
             for dec in decisions[-5:]:
@@ -271,20 +402,31 @@ class ProjectMemoryService:
             lines.append("- _No major architectural decisions recorded._")
         lines.append("")
 
-        # 6. Current Research Status
+        # Section 6. Current Research Status
         lines.append("## 6. Current Research Status")
-        # Read from STATE.md if available
         state_file = p_dir / "STATE.md"
         if state_file.exists():
             lines.append(f"- **State Source**: `{project_id}/STATE.md`")
             lines.append(f"- **Total Active Memories**: `{len(active_mems)}`")
         else:
             lines.append("- Project initialized; initial baseline phase.")
+        sec6_text = self._find_section_content(existing_sections, "Current Research Status")
+        if sec6_text:
+            for line in sec6_text.splitlines():
+                sline = line.strip()
+                if not sline:
+                    continue
+                if (
+                    sline.startswith("- **State Source**:")
+                    or sline.startswith("- **Total Active Memories**:")
+                    or sline == "- Project initialized; initial baseline phase."
+                ):
+                    continue
+                lines.append(line)
         lines.append("")
 
-        # 7. Paper Structure
+        # Section 7. Paper Structure
         lines.append("## 7. Paper Structure")
-        # Group observations by paper_section if defined
         section_mapped = [m for m in active_mems if m.frontmatter.paper_section]
         if section_mapped:
             sec_dict: dict[str, list[str]] = {}
@@ -293,12 +435,21 @@ class ProjectMemoryService:
             for sec_name, mids in sec_dict.items():
                 lines.append(f"- **{sec_name}**: {', '.join(f'`{mid}`' for mid in mids)}")
         else:
-            lines.append("- Section 1 (Introduction): _Not yet established_")
-            lines.append("- Section 3 (Methodology): _Not yet established_")
-            lines.append("- Section 4 (Experiments): _Not yet established_")
+            sec7_text = self._find_section_content(existing_sections, "Paper Structure")
+            custom_sec7: list[str] = []
+            if sec7_text:
+                for line in sec7_text.splitlines():
+                    if "_Not yet established_" not in line and line.strip():
+                        custom_sec7.append(line)
+            if custom_sec7:
+                lines.extend(custom_sec7)
+            else:
+                lines.append("- Section 1 (Introduction): _Not yet established_")
+                lines.append("- Section 3 (Methodology): _Not yet established_")
+                lines.append("- Section 4 (Experiments): _Not yet established_")
         lines.append("")
 
-        # 8. Important Memory Pointers
+        # Section 8. Important Memory Pointers
         lines.append("## 8. Important Memory Pointers")
         ptr_lines = []
         if observations:
@@ -316,17 +467,44 @@ class ProjectMemoryService:
             lines.append("- _None recorded yet._")
         lines.append("")
 
-        # 9. Next Actions
+        # Section 9. Next Actions
         lines.append("## 9. Next Actions")
-        lines.append("1. Review existing hypotheses and literature pointers.")
-        lines.append("2. Execute validation runs and record empirical findings.")
+        sec9_text = self._find_section_content(existing_sections, "Next Actions")
+        custom_actions: list[str] = []
+        if sec9_text:
+            default_actions = {
+                "1. Review existing hypotheses and literature pointers.",
+                "2. Execute validation runs and record empirical findings.",
+            }
+            for line in sec9_text.splitlines():
+                sline = line.strip()
+                if sline and sline not in default_actions:
+                    custom_actions.append(line)
+        if custom_actions:
+            lines.extend(custom_actions)
+        else:
+            lines.append("1. Review existing hypotheses and literature pointers.")
+            lines.append("2. Execute validation runs and record empirical findings.")
         lines.append("")
 
-        # 10. Important Warnings
+        # Section 10. Important Warnings
         lines.append("## 10. Important Warnings")
+        warn_lines: list[str] = []
         if negatives:
             for neg in negatives[-4:]:
-                lines.append(f"- > [!WARNING] **`{neg.id}` (Pitfall)**: {neg.title}")
+                warn_lines.append(f"- > [!WARNING] **`{neg.id}` (Pitfall)**: {neg.title}")
+        sec10_text = self._find_section_content(existing_sections, "Important Warnings")
+        if sec10_text:
+            for line in sec10_text.splitlines():
+                sline = line.strip()
+                if not sline or sline == "- _No critical pitfalls recorded yet._":
+                    continue
+                if any(neg.id in sline for neg in negatives):
+                    continue
+                warn_lines.append(line)
+
+        if warn_lines:
+            lines.extend(warn_lines)
         else:
             lines.append("- _No critical pitfalls recorded yet._")
         lines.append("")
@@ -334,7 +512,6 @@ class ProjectMemoryService:
         full_content = "\n".join(lines)
 
         # Enforce budget (~max_tokens)
-        mem_file = self.get_memory_file(project_id)
         lock_path = p_dir / ".researchos" / "memory_md.lock"
         with file_lock(lock_path, timeout=10.0):
             atomic_write_text(mem_file, full_content)

@@ -670,12 +670,17 @@ def project_memory_validate(project_id: str, vault_root: str | None = None) -> d
 def project_memory_rebuild(
     project_id: str,
     max_tokens: int = 2000,
+    preserve_custom_notes: bool = True,
     vault_root: str | None = None,
 ) -> dict[str, Any]:
     try:
         root = Settings.discover_vault_root(vault_root)
         pm_svc = ProjectMemoryService(root)
-        content = pm_svc.rebuild_project_memory(project_id, max_tokens=max_tokens)
+        content = pm_svc.rebuild_project_memory(
+            project_id,
+            max_tokens=max_tokens,
+            preserve_custom_notes=preserve_custom_notes,
+        )
         return {
             "status": "success",
             "project_id": project_id,

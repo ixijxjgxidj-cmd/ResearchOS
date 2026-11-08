@@ -49,9 +49,90 @@ def get_all_sensitive_patterns() -> list[re.Pattern]:
     return DEFAULT_SENSITIVE_PATTERNS + _custom_sensitive_patterns
 
 
+# Scientific and machine learning keys/values that must NEVER be redacted as credentials
+SCIENTIFIC_KEY_WHITELIST = {
+    "special_tokens",
+    "pad_token",
+    "pad_token_id",
+    "bos_token",
+    "bos_token_id",
+    "eos_token",
+    "eos_token_id",
+    "mask_token",
+    "mask_token_id",
+    "cls_token",
+    "cls_token_id",
+    "sep_token",
+    "sep_token_id",
+    "unk_token",
+    "unk_token_id",
+    "token_type_ids",
+    "token_embeddings",
+    "token_stride",
+    "token_length",
+    "num_tokens",
+    "max_tokens",
+    "target_tokens",
+    "input_tokens",
+    "output_tokens",
+    "used_tokens",
+    "total_tokens",
+    "tokens",
+    "token_count",
+    "tokenizer",
+    "tokenizer_name",
+    "tokenizer_type",
+    "tokenizer_config",
+    "hash",
+    "file_hash",
+    "file_hashes",
+    "commit_hash",
+    "model_hash",
+    "dataset_hash",
+    "sha256",
+    "sha1",
+    "sha512",
+    "md5",
+    "checksum",
+    "checksums",
+    "signature",
+    "commit",
+    "release_commit",
+    "code_commit",
+    "git_commit",
+    "codevector",
+    "codevectors",
+    "tokens_per_group",
+    "num_codevectors_per_group",
+    "proj_codevector_dim",
+}
+
+SCIENTIFIC_TEXT_PROTECT_PATTERN = re.compile(
+    r'(?i)\b(?:sha256|sha1|sha512|md5|checksum|git_commit|commit_hash|code_commit|release_commit|special_tokens|pad_token|mask_token)\s*[:=]\s*["\']?[0-9a-zA-Z_\-\.]{10,}["\']?'
+)
+
+
+def is_scientific_whitelisted_key(k_lower: str) -> bool:
+    """Returns True if the key represents scientific/ML concepts rather than credentials."""
+    if k_lower in SCIENTIFIC_KEY_WHITELIST:
+        return True
+    if any(k_lower.endswith(s) for s in ("_hash", "_hashes", "_checksum", "_checksums", "_commit")):
+        return True
+    if any(k_lower.startswith(s) for s in ("token_", "tokens_", "tokenizer_")):
+        return True
+    if any(term in k_lower for term in ("pad_token", "mask_token", "cls_token", "sep_token", "bos_token", "eos_token", "special_token")):
+        return True
+    return False
+
+
 def is_credential_key(key: str) -> bool:
     """Checks whether a dictionary key indicates an authentication secret."""
     k_lower = str(key).lower().strip()
+
+    # Explicit whitelist: never redact scientific/ML token definitions or checksum hashes
+    if is_scientific_whitelisted_key(k_lower):
+        return False
+
     if any(s in k_lower for s in ("password", "private_key", "secret", "api_key", "api-key")):
         return True
     if k_lower in (
@@ -74,23 +155,35 @@ def is_credential_key(key: str) -> bool:
 
 
 def sanitize_markdown_text(text: str) -> str:
-    """Redacts sensitive credentials and secrets from raw markdown text."""
+    """Redacts sensitive credentials and secrets from raw markdown text while preserving scientific data."""
     if not text:
         return text
 
-    sanitized = text
-    # Apply all registered regex patterns
+    # Step 1: Temporarily protect scientific hashes and ML token definitions
+    protected_spans: dict[str, str] = {}
+    def _protect_match(m: re.Match) -> str:
+        key = f"__SAFE_SCIENTIFIC_TOKEN_{len(protected_spans)}__"
+        protected_spans[key] = m.group(0)
+        return key
+
+    masked_text = SCIENTIFIC_TEXT_PROTECT_PATTERN.sub(_protect_match, text)
+
+    # Step 2: Apply all registered secret regex patterns
+    sanitized = masked_text
     for pat in get_all_sensitive_patterns():
         if pat.groups >= 2:
             # Key-value assignment match (e.g. key: secret) -> replace secret part with [REDACTED_CREDENTIAL]
             def _replace_kv(m: re.Match) -> str:
                 prefix = m.group(1)
-                # Keep the key label, redact the value
                 return f"{prefix}: [REDACTED_CREDENTIAL]"
 
             sanitized = pat.sub(_replace_kv, sanitized)
         else:
             sanitized = pat.sub("[REDACTED_CREDENTIAL]", sanitized)
+
+    # Step 3: Restore protected scientific data
+    for marker, original in protected_spans.items():
+        sanitized = sanitized.replace(marker, original)
 
     return sanitized
 

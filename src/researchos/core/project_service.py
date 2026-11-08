@@ -55,10 +55,11 @@ class ProjectService:
         self.vault_root.mkdir(parents=True, exist_ok=True)
 
     def get_project_dir(self, project_id: str) -> Path:
-        """Resolves and validates the project directory."""
+        """Resolves and validates the project directory (enforces case-normalized lowercase IDs)."""
         if not project_id or not project_id.strip():
             raise ValidationError("project_id cannot be empty.")
-        p_dir = validate_path_within(self.vault_root, project_id.strip())
+        clean_id = project_id.strip().lower()
+        p_dir = validate_path_within(self.vault_root, clean_id)
         return p_dir
 
     def create_project(
@@ -74,7 +75,8 @@ class ProjectService:
             raise ValidationError("Project name cannot be empty.")
 
         clean_name = name.strip()
-        pid = project_id.strip() if project_id and project_id.strip() else slugify_project_id(clean_name)
+        raw_pid = project_id.strip() if project_id and project_id.strip() else slugify_project_id(clean_name)
+        pid = raw_pid.lower()
         p_dir = self.get_project_dir(pid)
 
         # 1. Create subdirectories

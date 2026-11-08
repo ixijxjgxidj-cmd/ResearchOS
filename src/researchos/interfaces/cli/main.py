@@ -238,13 +238,16 @@ def project_memory_validate_cmd(
 def project_memory_rebuild_cmd(
     project_id: Annotated[str, typer.Argument(help="Project identifier")],
     tokens: Annotated[int, typer.Option("--tokens", "-t", help="Target token budget")] = 2000,
+    clean: Annotated[bool, typer.Option("--clean", help="Discard custom notes and rebuild clean template")] = False,
     vault: Annotated[str | None, typer.Option("--vault", "-v")] = None,
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    """Reconstructs MEMORY.md from scratch using PROJECT.md, STATE.md, and key memories."""
+    """Reconstructs MEMORY.md using PROJECT.md, STATE.md, and key memories, preserving custom notes by default."""
     v_path = get_vault_path(vault)
     pms = ProjectMemoryService(v_path)
-    res = pms.rebuild_project_memory(project_id, max_tokens=tokens)
+    res = pms.rebuild_project_memory(
+        project_id, max_tokens=tokens, preserve_custom_notes=not clean
+    )
     if as_json:
         output_data({"project_id": project_id, "status": "success", "content": res}, as_json=True)
     else:

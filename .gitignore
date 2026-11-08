@@ -43,4 +43,6 @@ Thumbs.db
 
 # Local ResearchOS artifacts during dev/test
 *.lock
+*.bak
 .backup_*
+ResearchVault/
